@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { CalendarDay, MoodRating } from '$lib/calendar/calendarTypes';
 
-	interface SaveData {
+	export interface SaveData {
 		description: string;
 		mood: MoodRating | null;
 		duration: number | null;
@@ -13,9 +13,10 @@
 		onSave: (data: SaveData) => Promise<void>;
 		onDelete: () => Promise<void>;
 		onClose: () => void;
+		onDirtyChange?: (dirty: boolean) => void;
 	}
 
-	let { day, saving = false, onSave, onDelete, onClose }: Props = $props();
+	let { day, saving = false, onSave, onDelete, onClose, onDirtyChange }: Props = $props();
 
 	const MOODS: { value: MoodRating; emoji: string; label: string }[] = [
 		{ value: 1, emoji: '😔', label: 'Rough' },
@@ -32,21 +33,30 @@
 	let confirmDelete = $state(false);
 	let error = $state('');
 
+	const originalDescription = day.log?.description ?? '';
+	const originalMood = day.log?.mood ?? null;
+	const originalDuration = day.log?.duration ?? null;
+	const originalMarked = day.log !== null;
+
+	$effect(() => {
+		const dirty =
+			isMarked !== originalMarked ||
+			description !== originalDescription ||
+			mood !== originalMood ||
+			duration !== originalDuration;
+		onDirtyChange?.(dirty);
+	});
+
 	const dateLabel = $derived.by(() => {
 		const dt = new Date(day.date + 'T00:00:00');
-		return dt.toLocaleDateString('en-US', {
-			weekday: 'long',
-			year: 'numeric',
-			month: 'long',
-			day: 'numeric'
-		});
+		return dt.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 	});
 
 	async function handleSave() {
 		error = '';
 		try {
 			await onSave({ description, mood, duration });
-			isMarked = true;
+			onClose(); // close modal after successful save
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not save.';
 		}
@@ -56,37 +66,19 @@
 		error = '';
 		try {
 			await onDelete();
-			isMarked = false;
-			description = '';
-			mood = null;
-			duration = null;
-			confirmDelete = false;
+			onClose(); // close modal after successful delete
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not delete.';
 		}
 	}
 </script>
 
-<div class="flex flex-col gap-4 rounded-xl border border-[var(--color-surface-700)]
-            bg-[var(--color-surface-900)] p-5">
-	<!-- Header -->
-	<div class="flex items-center justify-between gap-3">
-		<div class="flex flex-col gap-0.5">
-			<span class="text-sm font-semibold text-[var(--color-text-primary)]">{dateLabel}</span>
-			{#if day.isToday}
-				<span class="text-xs text-[var(--color-accent-400)]">Today</span>
-			{/if}
-		</div>
-		<button
-			onclick={onClose}
-			class="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-muted)]
-			       hover:bg-[var(--color-surface-800)] hover:text-[var(--color-text-primary)] transition-colors"
-			aria-label="Close"
-		>
-			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-				<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-			</svg>
-		</button>
+<div class="flex flex-col gap-4">
+	<div class="flex flex-col gap-0.5">
+		<span class="text-base font-semibold text-[var(--color-text-primary)]">{dateLabel}</span>
+		{#if day.isToday}
+			<span class="text-xs text-[var(--color-accent-400)]">Today</span>
+		{/if}
 	</div>
 
 	{#if day.isFuture}
@@ -124,10 +116,9 @@
 
 		<div class="flex flex-col gap-3">
 			<div class="flex flex-col gap-1.5">
-				<label class="text-xs font-medium text-[var(--color-text-secondary)]">
-					What did you study?
-				</label>
+				<label for="log-desc" class="text-xs font-medium text-[var(--color-text-secondary)]">What did you study?</label>
 				<textarea
+					id="log-desc"
 					bind:value={description}
 					rows={2}
 					placeholder="e.g. Chapter 3 of calculus, flashcard review…"
@@ -139,8 +130,9 @@
 			</div>
 
 			<div class="flex flex-col gap-1.5">
-				<label class="text-xs font-medium text-[var(--color-text-secondary)]">Duration (minutes)</label>
+				<label for="log-duration" class="text-xs font-medium text-[var(--color-text-secondary)]">Duration (minutes)</label>
 				<input
+					id="log-duration"
 					type="number"
 					bind:value={duration}
 					min={1}

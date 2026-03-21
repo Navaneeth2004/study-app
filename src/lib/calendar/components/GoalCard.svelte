@@ -12,29 +12,32 @@
 	let { goal, stats, onEdit, onDelete, onToggleActive }: Props = $props();
 
 	let confirmDelete = $state(false);
+	let expanded = $state(false);
 
-	const TYPE_LABELS: Record<string, string> = {
-		daily: 'Daily',
-		weekly: 'Weekly',
-		custom: 'Custom'
-	};
-
+	const TYPE_LABELS: Record<string, string> = { daily: 'Daily', weekly: 'Weekly', custom: 'Custom' };
 	const pct = $derived(Math.round(stats.completionRate * 100));
+
+	function formatDateLabel(dateStr: string): string {
+		const d = new Date(dateStr + 'T00:00:00');
+		return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+	}
 </script>
 
 <div class="flex flex-col gap-3 rounded-xl border border-[var(--color-surface-700)]
             bg-[var(--color-surface-900)] p-4 {goal.isActive ? '' : 'opacity-60'}">
+
 	<!-- Header -->
 	<div class="flex items-start justify-between gap-3">
 		<div class="flex flex-col gap-1 min-w-0 flex-1">
-			<span class="text-sm font-medium text-[var(--color-text-primary)] truncate">
-				{goal.title}
-			</span>
-			<div class="flex items-center gap-2">
+			<span class="text-sm font-medium text-[var(--color-text-primary)] truncate">{goal.title}</span>
+			<div class="flex items-center gap-2 flex-wrap">
 				<span class="rounded px-1.5 py-0.5 text-xs font-medium"
 				      style="background: color-mix(in srgb, var(--color-accent-500) 15%, transparent); color: var(--color-accent-400);">
 					{TYPE_LABELS[goal.type]}
 				</span>
+				{#if goal.targetMinutes}
+					<span class="text-xs text-[var(--color-text-muted)]">≥ {goal.targetMinutes} min/day</span>
+				{/if}
 				{#if !goal.isActive}
 					<span class="text-xs text-[var(--color-text-muted)]">Inactive</span>
 				{/if}
@@ -72,26 +75,78 @@
 	<!-- Progress bar -->
 	<div class="flex flex-col gap-1">
 		<div class="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
-			<span>{stats.completedDays} / {stats.totalTargetDays} days</span>
+			<span>
+				{stats.completedDays} / {stats.totalTargetDays} days
+				{#if stats.pendingDays > 0}
+					<span class="text-[var(--color-text-muted)]">({stats.pendingDays} remaining)</span>
+				{/if}
+			</span>
 			<span class="font-medium text-[var(--color-text-secondary)]">{pct}%</span>
 		</div>
 		<div class="h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-surface-700)]">
-			<div
-				class="h-full rounded-full bg-[var(--color-accent-500)] transition-all"
-				style="width: {pct}%"
-			></div>
+			<div class="h-full rounded-full transition-all"
+			     style="width: {pct}%; background: {pct >= 80 ? 'var(--color-success-500)' : pct >= 50 ? 'var(--color-accent-500)' : 'var(--color-warning-500)'};">
+			</div>
 		</div>
-		<div class="flex gap-3 text-xs text-[var(--color-text-muted)]">
-			{#if stats.missedDays > 0}
-				<span class="text-[var(--color-error-400)]">{stats.missedDays} missed</span>
+		<div class="flex gap-3 text-xs">
+			{#if stats.completedDays > 0}
+				<span class="text-[var(--color-success-500)]">✓ {stats.completedDays} done</span>
 			{/if}
-			{#if stats.pendingDays > 0}
-				<span>{stats.pendingDays} remaining</span>
+			{#if stats.missedDays > 0}
+				<span class="text-[var(--color-error-400)]">✗ {stats.missedDays} missed</span>
 			{/if}
 		</div>
 	</div>
 
-	<!-- Footer: toggle + confirm delete -->
+	<!-- Expand/collapse detail -->
+	{#if stats.completedDays > 0 || stats.missedDays > 0}
+		<button
+			onclick={() => (expanded = !expanded)}
+			class="flex items-center gap-1.5 self-start text-xs text-[var(--color-text-muted)]
+			       hover:text-[var(--color-text-secondary)] transition-colors"
+		>
+			<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+				{#if expanded}
+					<polyline points="18 15 12 9 6 15"/>
+				{:else}
+					<polyline points="6 9 12 15 18 9"/>
+				{/if}
+			</svg>
+			{expanded ? 'Hide details' : 'Show details'}
+		</button>
+
+		{#if expanded}
+			<div class="flex flex-col gap-3 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-800)] p-3">
+				{#if stats.completedDates.length > 0}
+					<div class="flex flex-col gap-1.5">
+						<span class="text-xs font-semibold text-[var(--color-success-500)]">
+							✓ Completed ({stats.completedDates.length})
+						</span>
+						<div class="flex flex-col gap-1 max-h-32 overflow-y-auto">
+							{#each stats.completedDates as date}
+								<span class="text-xs text-[var(--color-text-secondary)]">{formatDateLabel(date)}</span>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				{#if stats.missedDates.length > 0}
+					<div class="flex flex-col gap-1.5">
+						<span class="text-xs font-semibold text-[var(--color-error-400)]">
+							✗ Missed ({stats.missedDates.length})
+						</span>
+						<div class="flex flex-col gap-1 max-h-32 overflow-y-auto">
+							{#each stats.missedDates as date}
+								<span class="text-xs text-[var(--color-text-secondary)]">{formatDateLabel(date)}</span>
+							{/each}
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+	{/if}
+
+	<!-- Footer -->
 	<div class="flex items-center justify-between gap-2">
 		<button
 			onclick={() => onToggleActive(goal.id, !goal.isActive)}

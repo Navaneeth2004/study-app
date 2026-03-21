@@ -4,10 +4,10 @@ export type MoodRating = 1 | 2 | 3 | 4 | 5;
 export interface StudyLog {
 	id: string;
 	user: string;
-	date: string; // YYYY-MM-DD
+	date: string;
 	description: string;
 	mood: MoodRating | null;
-	duration: number | null; // minutes
+	duration: number | null;
 	created: string;
 }
 
@@ -16,8 +16,8 @@ export interface StudyGoal {
 	user: string;
 	title: string;
 	type: GoalType;
-	targetDays: string[] | null;        // custom: specific dates
-	targetDaysOfWeek: number[] | null;  // weekly: 0=Sun … 6=Sat
+	targetDays: string[] | null;
+	targetDaysOfWeek: number[] | null;
 	targetMinutes: number | null;
 	startDate: string;
 	endDate: string | null;
@@ -26,11 +26,11 @@ export interface StudyGoal {
 }
 
 export interface CalendarDay {
-	date: string; // YYYY-MM-DD
+	date: string;
 	log: StudyLog | null;
 	isToday: boolean;
 	isFuture: boolean;
-	isPadding: boolean; // belongs to prev/next month
+	isPadding: boolean;
 }
 
 export interface GoalStats {
@@ -39,5 +39,7 @@ export interface GoalStats {
 	completedDays: number;
 	missedDays: number;
 	pendingDays: number;
-	completionRate: number; // 0–1
+	completionRate: number;
+	completedDates: string[];
+	missedDates: string[];
 }
