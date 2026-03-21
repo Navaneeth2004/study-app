@@ -68,7 +68,6 @@
 <FlashcardViewModal flashcard={viewingCard} onClose={() => (viewingCard = null)} />
 
 <div class="flex flex-col gap-6 max-w-2xl">
-	<!-- Breadcrumb -->
 	<nav class="flex items-center gap-2 text-sm flex-wrap">
 		<a href="/viewer" class="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">Home</a>
 		<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" class="text-[var(--color-text-muted)]"><polyline points="9 18 15 12 9 6"/></svg>

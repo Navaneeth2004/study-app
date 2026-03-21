@@ -2,12 +2,13 @@
 	interface Props {
 		isOpen: boolean;
 		saving?: boolean;
+		zClass?: string;
 		onSave: () => Promise<void>;
 		onLeave: () => void;
 		onStay: () => void;
 	}
 
-	let { isOpen, saving = false, onSave, onLeave, onStay }: Props = $props();
+	let { isOpen, saving = false, zClass = 'z-50', onSave, onLeave, onStay }: Props = $props();
 
 	async function handleSaveAndLeave() {
 		await onSave();
@@ -16,7 +17,7 @@
 </script>
 
 {#if isOpen}
-	<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+	<div class="fixed inset-0 {zClass} flex items-center justify-center p-4">
 		<!-- Backdrop -->
 		<div class="absolute inset-0 bg-black/70" aria-hidden="true"></div>
 

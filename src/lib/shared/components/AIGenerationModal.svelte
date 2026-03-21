@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { generateContent } from '$lib/ai/aiService';
 	import { getKey, getAvailableProviders } from '$lib/settings/aiKeyStore';
+	import UnsavedChangesModal from '$lib/shared/components/UnsavedChangesModal.svelte';
 	import type { AIProvider, AIOutputType, AIGenerationResult } from '$lib/ai/aiTypes';
 
 	interface Props {
@@ -28,6 +29,8 @@
 		groq: 'Groq'
 	};
 
+	const VISION_PROVIDERS: AIProvider[] = ['openai', 'anthropic', 'gemini'];
+
 	let availableProviders = $state<AIProvider[]>([]);
 	let selectedProvider = $state<AIProvider | null>(null);
 	let prompt = $state('');
@@ -39,7 +42,11 @@
 	let result = $state<AIGenerationResult | null>(null);
 	let editableCards = $state<Array<{ front_text: string; back_text: string }>>([]);
 	let error = $state('');
-	let showCloseConfirm = $state(false);
+	let showDiscardModal = $state(false);
+
+	const supportsVision = $derived(
+		selectedProvider !== null && VISION_PROVIDERS.includes(selectedProvider)
+	);
 
 	onMount(() => {
 		availableProviders = getAvailableProviders();
@@ -47,8 +54,8 @@
 	});
 
 	function attemptClose() {
-		if (result && !showCloseConfirm) {
-			showCloseConfirm = true;
+		if (result) {
+			showDiscardModal = true;
 		} else {
 			onClose();
 		}
@@ -60,14 +67,13 @@
 		error = '';
 		result = null;
 		editableCards = [];
-		showCloseConfirm = false;
 		try {
 			result = await generateContent({
 				provider: selectedProvider,
 				apiKey: getKey(selectedProvider),
 				prompt: prompt.trim(),
 				existingContent: existingDraft.trim() || undefined,
-				referenceImage: imageBase64 || undefined,
+				referenceImage: (imageBase64 && supportsVision) ? imageBase64 : undefined,
 				outputType,
 				flashcardCount: outputType === 'flashcards' ? flashcardCount : undefined
 			});
@@ -115,8 +121,17 @@
 	);
 </script>
 
+<!-- z-[60] so it sits above the AI modal (z-50) -->
+<UnsavedChangesModal
+	isOpen={showDiscardModal}
+	saving={false}
+	zClass="z-[60]"
+	onSave={async () => { showDiscardModal = false; handleInsert(); }}
+	onLeave={() => { showDiscardModal = false; onClose(); }}
+	onStay={() => (showDiscardModal = false)}
+/>
+
 {#if isOpen}
-	<!-- Backdrop — clicking it attempts close -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
@@ -124,7 +139,6 @@
 		style="background: rgba(0,0,0,0.75);"
 		onclick={attemptClose}
 	>
-		<!-- Modal — stop propagation -->
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
@@ -154,33 +168,6 @@
 					</svg>
 				</button>
 			</div>
-
-			<!-- Close confirm banner -->
-			{#if showCloseConfirm}
-				<div class="flex shrink-0 items-center justify-between gap-4 border-b
-				            border-[var(--color-surface-700)] bg-[var(--color-warning-500)]/5
-				            px-5 py-3">
-					<p class="text-sm text-[var(--color-text-secondary)]">
-						Discard generated content?
-					</p>
-					<div class="flex shrink-0 items-center gap-2">
-						<button
-							onclick={onClose}
-							class="rounded-lg bg-[var(--color-error-500)]/15 px-3 py-1.5 text-xs font-medium
-							       text-[var(--color-error-400)] hover:bg-[var(--color-error-500)]/25 transition-colors"
-						>
-							Discard
-						</button>
-						<button
-							onclick={() => (showCloseConfirm = false)}
-							class="rounded-lg border border-[var(--color-surface-600)] px-3 py-1.5 text-xs
-							       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-						>
-							Keep editing
-						</button>
-					</div>
-				</div>
-			{/if}
 
 			<!-- Scrollable body -->
 			<div class="flex flex-col gap-4 overflow-y-auto p-5">
@@ -249,7 +236,7 @@
 						</div>
 					{/if}
 
-					<!-- Existing content (collapsible) -->
+					<!-- Existing content -->
 					<div class="flex flex-col gap-1.5">
 						<button
 							type="button"
@@ -277,17 +264,22 @@
 						{/if}
 					</div>
 
-					<!-- Image attachment (all providers; Groq ignores it gracefully) -->
+					<!-- Image attachment -->
 					<div class="flex flex-col gap-1.5">
 						{#if imageBase64}
-							<div class="flex items-center gap-3">
+							<div class="flex items-start gap-3">
 								<img
 									src="data:image/jpeg;base64,{imageBase64}"
 									alt="Reference"
-									class="h-14 w-14 rounded-lg border border-[var(--color-surface-700)] object-cover"
+									class="h-14 w-14 shrink-0 rounded-lg border border-[var(--color-surface-700)] object-cover"
 								/>
-								<div class="flex flex-col gap-0.5">
+								<div class="flex flex-col gap-1">
 									<span class="text-xs text-[var(--color-text-secondary)]">Reference image attached</span>
+									{#if !supportsVision}
+										<span class="text-xs text-[var(--color-warning-500)]">
+											⚠ {PROVIDER_LABELS[selectedProvider!]} cannot see images. Switch to OpenAI, Anthropic, or Gemini.
+										</span>
+									{/if}
 									<button
 										type="button"
 										onclick={() => (imageBase64 = '')}
