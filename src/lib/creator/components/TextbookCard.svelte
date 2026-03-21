@@ -12,12 +12,12 @@
 </script>
 
 <div class="app-card group">
-	<!-- Top row: title + icon -->
 	<div class="flex items-start justify-between gap-3 flex-1">
 		<div class="flex flex-col gap-1 min-w-0 flex-1">
 			<a
 				href="/creator/textbooks/{textbook.id}"
-				class="app-card-title leading-snug group-hover:text-[var(--color-accent-400)] truncate transition-colors"
+				class="text-base font-medium leading-snug truncate transition-colors
+				       text-[var(--color-text-primary)] group-hover:text-[var(--color-accent-400)]"
 			>
 				{textbook.title}
 			</a>
@@ -28,7 +28,6 @@
 			{/if}
 		</div>
 
-		<!-- Book icon + action buttons (actions appear on hover) -->
 		<div class="shrink-0 flex items-center gap-1">
 			<div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
 				<a
@@ -57,7 +56,6 @@
 					</button>
 				{/if}
 			</div>
-			<!-- Book icon (always visible) -->
 			<div class="flex h-8 w-8 items-center justify-center rounded-lg"
 			     style="background: color-mix(in srgb, var(--color-accent-500) 15%, transparent);">
 				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -70,7 +68,6 @@
 		</div>
 	</div>
 
-	<!-- Bottom: count + delete confirm -->
 	<div class="flex flex-col gap-2">
 		<span class="text-xs text-[var(--color-text-muted)]">
 			{textbook.chaptersCount ?? 0} {textbook.chaptersCount === 1 ? 'chapter' : 'chapters'}

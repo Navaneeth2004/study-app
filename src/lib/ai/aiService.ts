@@ -108,14 +108,21 @@ async function callGemini(
 	request: AIGenerationRequest,
 	systemPrompt: string
 ): Promise<Record<string, unknown>> {
-	const fullText = `${systemPrompt}\n\n${buildUserText(request)}`;
+	const parts: unknown[] = [];
+	if (request.referenceImage) {
+		parts.push({
+			inline_data: { mime_type: 'image/jpeg', data: request.referenceImage }
+		});
+	}
+	parts.push({ text: `${systemPrompt}\n\n${buildUserText(request)}` });
+
 	const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${request.apiKey}`;
 
 	const res = await fetch(url, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({
-			contents: [{ parts: [{ text: fullText }] }],
+			contents: [{ parts }],
 			generationConfig: { responseMimeType: 'application/json' }
 		})
 	});
@@ -128,6 +135,7 @@ async function callGroq(
 	request: AIGenerationRequest,
 	systemPrompt: string
 ): Promise<Record<string, unknown>> {
+	// Groq's llama model does not support vision — image is ignored gracefully
 	const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
 		method: 'POST',
 		headers: {

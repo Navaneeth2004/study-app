@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import {
-		exportAll, exportSelected, importFromFile,
+		exportAll, exportSelected, importFromFile, readManifest,
 		type ImportProgress, type ImportSummary, type Manifest
 	} from '$lib/settings/exportImportService';
 	import { listTextbooks } from '$lib/creator/textbookService';
@@ -116,7 +116,6 @@
 		previewError = '';
 		previewManifest = null;
 
-		// Parse manifest for preview without importing yet
 		try {
 			const manifest = await readManifest(file);
 			pendingFile = file;
@@ -229,7 +228,6 @@
 				</p>
 			</div>
 
-			<!-- Textbooks list -->
 			{#if previewManifest.textbooks.length > 0}
 				<div class="flex flex-col gap-2">
 					<p class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">
@@ -249,7 +247,6 @@
 				</div>
 			{/if}
 
-			<!-- Categories list -->
 			{#if previewManifest.flashcard_categories.length > 0}
 				<div class="flex flex-col gap-2">
 					<p class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">

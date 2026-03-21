@@ -37,14 +37,22 @@
 	let imageBase64 = $state('');
 	let generating = $state(false);
 	let result = $state<AIGenerationResult | null>(null);
-	// Mutable card list so user can remove before inserting
 	let editableCards = $state<Array<{ front_text: string; back_text: string }>>([]);
 	let error = $state('');
+	let showCloseConfirm = $state(false);
 
 	onMount(() => {
 		availableProviders = getAvailableProviders();
 		if (availableProviders.length > 0) selectedProvider = availableProviders[0];
 	});
+
+	function attemptClose() {
+		if (result && !showCloseConfirm) {
+			showCloseConfirm = true;
+		} else {
+			onClose();
+		}
+	}
 
 	async function handleGenerate() {
 		if (!selectedProvider || !prompt.trim()) return;
@@ -52,6 +60,7 @@
 		error = '';
 		result = null;
 		editableCards = [];
+		showCloseConfirm = false;
 		try {
 			result = await generateContent({
 				provider: selectedProvider,
@@ -107,16 +116,22 @@
 </script>
 
 {#if isOpen}
+	<!-- Backdrop — clicking it attempts close -->
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center p-4"
 		style="background: rgba(0,0,0,0.75);"
-		role="dialog"
-		aria-modal="true"
+		onclick={attemptClose}
 	>
+		<!-- Modal — stop propagation -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
 			class="relative flex w-full max-w-xl flex-col rounded-2xl border
 			       border-[var(--color-surface-700)] bg-[var(--color-surface-950)] shadow-2xl"
 			style="max-height: 90vh;"
+			onclick={(e) => e.stopPropagation()}
 		>
 			<!-- Header -->
 			<div class="flex shrink-0 items-center justify-between border-b
@@ -128,7 +143,7 @@
 					</span>
 				</div>
 				<button
-					onclick={onClose}
+					onclick={attemptClose}
 					aria-label="Close"
 					class="flex h-7 w-7 items-center justify-center rounded-lg
 					       text-[var(--color-text-muted)] hover:bg-[var(--color-surface-800)]
@@ -139,6 +154,33 @@
 					</svg>
 				</button>
 			</div>
+
+			<!-- Close confirm banner -->
+			{#if showCloseConfirm}
+				<div class="flex shrink-0 items-center justify-between gap-4 border-b
+				            border-[var(--color-surface-700)] bg-[var(--color-warning-500)]/5
+				            px-5 py-3">
+					<p class="text-sm text-[var(--color-text-secondary)]">
+						Discard generated content?
+					</p>
+					<div class="flex shrink-0 items-center gap-2">
+						<button
+							onclick={onClose}
+							class="rounded-lg bg-[var(--color-error-500)]/15 px-3 py-1.5 text-xs font-medium
+							       text-[var(--color-error-400)] hover:bg-[var(--color-error-500)]/25 transition-colors"
+						>
+							Discard
+						</button>
+						<button
+							onclick={() => (showCloseConfirm = false)}
+							class="rounded-lg border border-[var(--color-surface-600)] px-3 py-1.5 text-xs
+							       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+						>
+							Keep editing
+						</button>
+					</div>
+				</div>
+			{/if}
 
 			<!-- Scrollable body -->
 			<div class="flex flex-col gap-4 overflow-y-auto p-5">
@@ -190,12 +232,10 @@
 						></textarea>
 					</div>
 
-					<!-- Flashcard count (flashcards only) -->
+					<!-- Flashcard count -->
 					{#if outputType === 'flashcards'}
 						<div class="flex flex-col gap-1.5">
-							<label class="text-xs font-medium text-[var(--color-text-secondary)]">
-								How many cards?
-							</label>
+							<label class="text-xs font-medium text-[var(--color-text-secondary)]">How many cards?</label>
 							<input
 								type="number"
 								bind:value={flashcardCount}
@@ -218,11 +258,8 @@
 							       text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
 						>
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-								{#if showExisting}
-									<polyline points="18 15 12 9 6 15"/>
-								{:else}
-									<polyline points="6 9 12 15 18 9"/>
-								{/if}
+								{#if showExisting}<polyline points="18 15 12 9 6 15"/>
+								{:else}<polyline points="6 9 12 15 18 9"/>{/if}
 							</svg>
 							Existing content to rewrite
 						</button>
@@ -240,7 +277,7 @@
 						{/if}
 					</div>
 
-					<!-- Image attachment (all providers) -->
+					<!-- Image attachment (all providers; Groq ignores it gracefully) -->
 					<div class="flex flex-col gap-1.5">
 						{#if imageBase64}
 							<div class="flex items-center gap-3">
@@ -295,7 +332,6 @@
 						{/if}
 					</button>
 
-					<!-- Error -->
 					{#if error}
 						<p class="text-sm text-[var(--color-error-400)]">{error}</p>
 					{/if}
@@ -304,9 +340,7 @@
 					{#if result}
 						<div class="flex flex-col gap-3 rounded-xl border border-[var(--color-surface-700)]
 						            bg-[var(--color-surface-900)] p-4">
-							<span class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">
-								Preview
-							</span>
+							<span class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">Preview</span>
 
 							{#if result.outputType === 'paragraph'}
 								<p class="text-sm leading-relaxed text-[var(--color-text-primary)]">
@@ -340,8 +374,7 @@
 											{#each (result.data.rows as string[][] ?? []) as row}
 												<tr>
 													{#each row as cell}
-														<td class="border-b border-[var(--color-surface-700)]/50 px-3 py-1.5
-														           text-[var(--color-text-primary)]">
+														<td class="border-b border-[var(--color-surface-700)]/50 px-3 py-1.5 text-[var(--color-text-primary)]">
 															{cell}
 														</td>
 													{/each}
@@ -376,8 +409,8 @@
 												type="button"
 												onclick={() => removeCard(i)}
 												aria-label="Remove card"
-												class="mt-0.5 shrink-0 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100
-												       hover:text-[var(--color-error-400)] transition-all"
+												class="mt-0.5 shrink-0 text-[var(--color-text-muted)] opacity-0
+												       group-hover:opacity-100 hover:text-[var(--color-error-400)] transition-all"
 											>
 												<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
 													<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
