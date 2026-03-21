@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import type { Flashcard, FlashcardForm } from '$lib/creator/flashcardTypes';
 	import FlipCard from '$lib/shared/components/FlipCard.svelte';
+	import AIGenerationModal from '$lib/shared/components/AIGenerationModal.svelte';
+	import type { AIGenerationResult } from '$lib/ai/aiTypes';
 
 	interface Props {
 		flashcard: Flashcard | null;
@@ -26,6 +28,7 @@
 	let saving = $state(false);
 	let error = $state('');
 	let previewMode = $state(false);
+	let showAIModal = $state(false);
 
 	onMount(() => {
 		frontText = flashcard?.frontText ?? '';
@@ -45,6 +48,20 @@
 			!!frontAudioFile || !!backAudioFile;
 		isDirty = changed;
 	});
+
+	const aiExistingContent = $derived(
+		[frontText, backText].filter(Boolean).join('\n\n')
+	);
+
+	function handleAIInsert(result: AIGenerationResult) {
+		if (result.outputType !== 'flashcards') return;
+		const cards = result.data.flashcards;
+		if (!Array.isArray(cards) || cards.length === 0) return;
+		const first = cards[0] as { front_text: string; back_text: string };
+		frontText = first.front_text ?? '';
+		backText = first.back_text ?? '';
+		isDirty = true;
+	}
 
 	async function handleSave() {
 		if (!frontText.trim()) { error = 'Front text is required.'; return; }
@@ -101,6 +118,16 @@
 	}
 </script>
 
+{#if showAIModal}
+	<AIGenerationModal
+		isOpen={true}
+		outputType="flashcards"
+		existingContent={aiExistingContent}
+		onInsert={handleAIInsert}
+		onClose={() => (showAIModal = false)}
+	/>
+{/if}
+
 <div class="flex flex-col gap-4 rounded-xl border border-[var(--color-accent-500)]/30
             bg-[var(--color-surface-900)] p-5">
 
@@ -109,13 +136,26 @@
 		<h3 class="text-sm font-semibold text-[var(--color-text-secondary)]">
 			{flashcard ? 'Edit Flashcard' : 'New Flashcard'}
 		</h3>
-		<button
-			onclick={() => (previewMode = !previewMode)}
-			class="rounded-lg border border-[var(--color-surface-600)] px-3 py-1 text-xs
-			       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-		>
-			{previewMode ? 'Back to Edit' : 'Preview'}
-		</button>
+		<div class="flex items-center gap-2">
+			<button
+				onclick={() => (showAIModal = true)}
+				class="flex items-center gap-1.5 rounded-lg border border-[var(--color-surface-600)]
+				       px-3 py-1 text-xs text-[var(--color-text-secondary)]
+				       hover:text-[var(--color-text-primary)] transition-colors"
+			>
+				<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+					<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+				</svg>
+				Generate
+			</button>
+			<button
+				onclick={() => (previewMode = !previewMode)}
+				class="rounded-lg border border-[var(--color-surface-600)] px-3 py-1 text-xs
+				       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+			>
+				{previewMode ? 'Back to Edit' : 'Preview'}
+			</button>
+		</div>
 	</div>
 
 	{#if previewMode}
