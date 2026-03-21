@@ -1,0 +1,130 @@
+<script lang="ts">
+	import type { BlockType, ChapterBlock } from '$lib/creator/contentTypes';
+	import { BLOCK_TYPE_LABELS } from '$lib/creator/contentTypes';
+
+	interface Props {
+		type: BlockType;
+		blockData: ChapterBlock['data'];
+		blockId: string;
+		onDelete: () => void;
+		onDragStart: (e: DragEvent, id: string) => void;
+		onDrop: (e: DragEvent, id: string) => void;
+		draggingId: string | null;
+		children: import('svelte').Snippet;
+	}
+
+	let { type, blockData, blockId, onDelete, onDragStart, onDrop, draggingId, children }: Props =
+		$props();
+
+	let confirmingDelete = $state(false);
+	let collapsed = $state(false);
+
+	const isDragging = $derived(draggingId === blockId);
+
+	function getPreview(data: ChapterBlock['data']): string {
+		if ('text' in data) return data.text.slice(0, 60) || '—';
+		if ('html' in data) return data.html.replace(/<[^>]+>/g, '').slice(0, 60) || '—';
+		if ('items' in data) return (data.items[0] ?? '').slice(0, 60) || '—';
+		if ('headers' in data) return data.headers.join(', ').slice(0, 60) || '—';
+		if ('caption' in data) return 'Image';
+		if ('label' in data) return 'Audio';
+		return '—';
+	}
+</script>
+
+<div
+	role="listitem"
+	draggable="true"
+	ondragstart={(e) => onDragStart(e, blockId)}
+	ondragover={(e) => e.preventDefault()}
+	ondrop={(e) => onDrop(e, blockId)}
+	class="group flex flex-col rounded-xl border bg-[var(--color-surface-900)] transition-all
+	       {isDragging
+		? 'border-[var(--color-accent-500)] opacity-50'
+		: 'border-[var(--color-surface-700)] hover:border-[var(--color-surface-600)]'}"
+>
+	<!-- Header -->
+	<div class="flex items-center gap-2 px-4 py-3">
+		<!-- Drag handle -->
+		<div
+			class="shrink-0 cursor-grab text-[var(--color-text-muted)] opacity-0
+			       group-hover:opacity-100 transition-opacity active:cursor-grabbing"
+			aria-hidden="true"
+		>
+			<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+				<line x1="8" y1="6" x2="16" y2="6"/>
+				<line x1="8" y1="12" x2="16" y2="12"/>
+				<line x1="8" y1="18" x2="16" y2="18"/>
+			</svg>
+		</div>
+
+		<!-- Type label -->
+		<span class="flex-1 text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">
+			{BLOCK_TYPE_LABELS[type]}
+		</span>
+
+		<!-- Collapsed preview -->
+		{#if collapsed}
+			<span class="mr-2 flex-1 truncate text-xs text-[var(--color-text-secondary)]">
+				{getPreview(blockData)}
+			</span>
+		{/if}
+
+		<!-- Controls -->
+		<div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+			<!-- Collapse toggle -->
+			<button
+				onclick={() => (collapsed = !collapsed)}
+				aria-label={collapsed ? 'Expand block' : 'Collapse block'}
+				class="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-muted)]
+				       hover:bg-[var(--color-surface-800)] hover:text-[var(--color-text-primary)] transition-colors"
+			>
+				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					{#if collapsed}
+						<polyline points="6 9 12 15 18 9"/>
+					{:else}
+						<polyline points="18 15 12 9 6 15"/>
+					{/if}
+				</svg>
+			</button>
+
+			{#if !confirmingDelete}
+				<button
+					onclick={() => (confirmingDelete = true)}
+					aria-label="Delete block"
+					class="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-muted)]
+					       hover:bg-[var(--color-surface-800)] hover:text-[var(--color-error-400)] transition-colors"
+				>
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+						<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+						<path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+					</svg>
+				</button>
+			{:else}
+				<div class="flex items-center gap-1.5">
+					<button
+						onclick={() => { confirmingDelete = false; onDelete(); }}
+						class="rounded-lg bg-[var(--color-error-500)]/15 px-2 py-1 text-xs font-medium
+						       text-[var(--color-error-400)] hover:bg-[var(--color-error-500)]/25 transition-colors"
+					>
+						Delete
+					</button>
+					<button
+						onclick={() => (confirmingDelete = false)}
+						class="rounded-lg border border-[var(--color-surface-600)] px-2 py-1 text-xs
+						       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+					>
+						Cancel
+					</button>
+				</div>
+			{/if}
+		</div>
+	</div>
+
+	<!-- Block content -->
+	{#if !collapsed}
+		<div class="border-t border-[var(--color-surface-700)] px-4 py-4">
+			{@render children()}
+		</div>
+	{/if}
+</div>

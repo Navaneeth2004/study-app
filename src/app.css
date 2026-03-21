@@ -1,0 +1,100 @@
+@import 'tailwindcss';
+
+@theme {
+	--color-surface-950: #0a0a0f;
+	--color-surface-900: #111118;
+	--color-surface-800: #1a1a24;
+	--color-surface-700: #242433;
+	--color-surface-600: #32324a;
+
+	--color-text-primary: #f0f0f8;
+	--color-text-secondary: #9898b8;
+	--color-text-muted: #5c5c7a;
+
+	--color-accent-500: #6c63ff;
+	--color-accent-400: #8b85ff;
+	--color-accent-300: #aba7ff;
+
+	--color-success-500: #22c55e;
+	--color-warning-500: #f59e0b;
+	--color-warning-400: #fbbf24;
+	--color-error-500: #ef4444;
+	--color-error-400: #f87171;
+
+	--font-display: 'DM Serif Display', Georgia, serif;
+	--font-body: 'DM Sans', system-ui, sans-serif;
+	--font-mono: 'JetBrains Mono', 'Courier New', monospace;
+}
+
+:root {
+	color-scheme: dark;
+	--callout-info: #3b82f6;
+	--callout-warning: #f59e0b;
+	--callout-tip: #22c55e;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	height: 100%;
+	margin: 0;
+	padding: 0;
+	background-color: var(--color-surface-950);
+	color: var(--color-text-primary);
+	font-family: var(--font-body);
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+	-webkit-box-shadow: 0 0 0px 1000px var(--color-surface-800) inset;
+	-webkit-text-fill-color: var(--color-text-primary);
+	transition: background-color 5000s ease-in-out 0s;
+}
+
+/* ── Shared card height standards ── */
+:root {
+	--card-grid-min-height: 100px;
+	--card-row-min-height: 56px;
+}
+
+/* ── Shared card base ── */
+.app-card {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	border-radius: 0.75rem;
+	border: 1px solid var(--color-surface-700);
+	background: var(--color-surface-900);
+	padding: 1rem 1.25rem;
+	min-height: var(--card-grid-min-height);
+}
+
+.app-card.flex-row {
+	flex-direction: row;
+	align-items: center;
+	min-height: var(--card-row-min-height);
+}
+
+.app-card-title {
+	font-size: 1rem;
+	font-weight: 500;
+	color: var(--color-text-primary);
+	transition: color 0.15s;
+}
+
+.app-card-clickable {
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.app-card-clickable:hover .app-card-title {
+	color: var(--color-accent-400);
+}
