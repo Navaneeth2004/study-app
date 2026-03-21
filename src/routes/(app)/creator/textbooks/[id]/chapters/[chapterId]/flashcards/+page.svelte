@@ -9,8 +9,10 @@
 	} from '$lib/creator/flashcardService';
 	import FlashcardCard from '$lib/creator/components/flashcards/FlashcardCard.svelte';
 	import FlashcardEditModal from '$lib/creator/components/flashcards/FlashcardEditModal.svelte';
+	import AIGenerationModal from '$lib/shared/components/AIGenerationModal.svelte';
 	import EmptyState from '$lib/shared/components/EmptyState.svelte';
 	import type { Flashcard, FlashcardForm } from '$lib/creator/flashcardTypes';
+	import type { AIGenerationResult } from '$lib/ai/aiTypes';
 
 	const textbookId = $derived($page.params.id as string);
 	const chapterId = $derived($page.params.chapterId as string);
@@ -22,6 +24,7 @@
 	let error = $state('');
 	let modalCard = $state<Flashcard | null | 'new'>(null);
 	let draggingId = $state<string | null>(null);
+	let showAIModal = $state(false);
 
 	onMount(async () => {
 		loading = true;
@@ -78,6 +81,27 @@
 		try { await reorderFlashcards(flashcards); }
 		catch (e) { error = e instanceof Error ? e.message : 'Could not reorder.'; }
 	}
+
+	async function handleAIInsert(result: AIGenerationResult) {
+		if (result.outputType !== 'flashcards') return;
+		const cards = (result.data.flashcards ?? []) as Array<{ front_text: string; back_text: string }>;
+		if (!Array.isArray(cards) || cards.length === 0) return;
+		try {
+			const created = await Promise.all(
+				cards.map((card, i) =>
+					createFlashcard({
+						frontText: card.front_text,
+						backText: card.back_text,
+						chapter: chapterId,
+						order: flashcards.length + i + 1
+					})
+				)
+			);
+			flashcards = [...flashcards, ...created];
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Could not insert generated flashcards.';
+		}
+	}
 </script>
 
 <svelte:head>
@@ -89,6 +113,15 @@
 		flashcard={modalCard === 'new' ? null : modalCard}
 		onSave={handleSave}
 		onClose={() => (modalCard = null)}
+	/>
+{/if}
+
+{#if showAIModal}
+	<AIGenerationModal
+		isOpen={true}
+		outputType="flashcards"
+		onInsert={handleAIInsert}
+		onClose={() => (showAIModal = false)}
 	/>
 {/if}
 
@@ -120,17 +153,30 @@
 
 	<div class="flex items-center justify-between gap-4">
 		<h1 class="font-display text-3xl text-[var(--color-text-primary)]">Flashcards</h1>
-		<button
-			onclick={() => (modalCard = 'new')}
-			class="flex items-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-2.5
-			       text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)]
-			       transition-colors shrink-0"
-		>
-			<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-				<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-			</svg>
-			New Flashcard
-		</button>
+		<div class="flex shrink-0 items-center gap-2">
+			<button
+				onclick={() => (showAIModal = true)}
+				class="flex items-center gap-2 rounded-xl border border-[var(--color-surface-600)] px-4 py-2.5
+				       text-sm font-medium text-[var(--color-text-secondary)]
+				       hover:text-[var(--color-text-primary)] hover:border-[var(--color-surface-500)] transition-colors"
+			>
+				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+					<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+				</svg>
+				Generate with AI
+			</button>
+			<button
+				onclick={() => (modalCard = 'new')}
+				class="flex items-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-2.5
+				       text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)]
+				       transition-colors"
+			>
+				<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+					<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+				</svg>
+				New Flashcard
+			</button>
+		</div>
 	</div>
 
 	{#if error}

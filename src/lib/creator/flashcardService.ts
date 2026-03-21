@@ -78,7 +78,7 @@ export async function createFlashcard(data: FlashcardForm): Promise<Flashcard> {
 		if (data.backImageFile) formData.append('back_image', data.backImageFile);
 		if (data.frontAudioFile) formData.append('front_audio', data.frontAudioFile);
 		if (data.backAudioFile) formData.append('back_audio', data.backAudioFile);
-		const r = await pb.collection('flashcards').create(formData);
+		const r = await pb.collection('flashcards').create(formData, { requestKey: null });
 		return toFlashcard(r);
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);

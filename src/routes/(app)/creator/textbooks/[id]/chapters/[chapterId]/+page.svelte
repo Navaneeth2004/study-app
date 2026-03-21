@@ -8,7 +8,6 @@
 		listBlocks, createBlock, updateBlock,
 		deleteBlock, reorderBlocks, uploadFile
 	} from '$lib/creator/contentService';
-	import { createFlashcard } from '$lib/creator/flashcardService';
 	import InlineEdit from '$lib/creator/components/InlineEdit.svelte';
 	import BlockWrapper from '$lib/creator/components/blocks/BlockWrapper.svelte';
 	import BlockTypePicker from '$lib/creator/components/blocks/BlockTypePicker.svelte';
@@ -52,7 +51,7 @@
 	let pendingHref = $state('');
 	let draggingId = $state<string | null>(null);
 
-	// AI state
+	// AI state — content blocks only (paragraph, bullet_list, table)
 	let showAIPicker = $state(false);
 	let aiOutputType = $state<AIOutputType>('paragraph');
 	let showAIModal = $state(false);
@@ -60,8 +59,7 @@
 	const AI_OUTPUT_TYPES: { type: AIOutputType; label: string }[] = [
 		{ type: 'paragraph', label: 'Paragraph' },
 		{ type: 'bullet_list', label: 'Bullet List' },
-		{ type: 'table', label: 'Table' },
-		{ type: 'flashcards', label: 'Flashcards' }
+		{ type: 'table', label: 'Table' }
 	];
 
 	const pendingData = new Map<string, Record<string, unknown>>();
@@ -173,26 +171,10 @@
 
 	async function handleAIInsert(result: AIGenerationResult) {
 		try {
-			if (result.outputType === 'flashcards') {
-				const cards = (result.data.flashcards ?? []) as Array<{ front_text: string; back_text: string }>;
-				if (Array.isArray(cards) && cards.length > 0) {
-					await Promise.all(
-						cards.map((card, i) =>
-							createFlashcard({
-								frontText: card.front_text,
-								backText: card.back_text,
-								chapter: chapterId,
-								order: i + 1
-							})
-						)
-					);
-				}
-			} else {
-				const blockType = result.outputType as BlockType;
-				const block = await createBlock(chapterId, blockType, blocks.length + 1);
-				pendingData.set(block.id, result.data);
-				blocks = [...blocks, { ...block, data: result.data } as RuntimeBlock];
-			}
+			const blockType = result.outputType as BlockType;
+			const block = await createBlock(chapterId, blockType, blocks.length + 1);
+			pendingData.set(block.id, result.data);
+			blocks = [...blocks, { ...block, data: result.data } as RuntimeBlock];
 			isDirty = true;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not insert generated content.';
@@ -396,7 +378,7 @@
 		{#if !previewMode}
 			<BlockTypePicker onSelect={handleAddBlock} />
 
-			<!-- AI type picker -->
+			<!-- AI block generator -->
 			<div class="relative">
 				<button
 					onclick={() => (showAIPicker = !showAIPicker)}
