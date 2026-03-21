@@ -15,8 +15,10 @@
 		}
 	});
 
-	// Pages that render their own breadcrumbs suppress the layout one
+	// Pages that render their own breadcrumbs (or need none) suppress the layout one
 	const suppressBreadcrumb = $derived(
+		$page.url.pathname === '/creator' ||
+		$page.url.pathname === '/creator/flashcards' ||
 		/\/creator\/textbooks\/[^/]+\/chapters\/[^/]+$/.test($page.url.pathname) ||
 		/\/creator\/textbooks\/[^/]+\/chapters\/[^/]+\/flashcards/.test($page.url.pathname) ||
 		/\/creator\/flashcards\/[^/]+/.test($page.url.pathname)

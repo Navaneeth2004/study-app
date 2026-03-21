@@ -28,8 +28,6 @@
 		groq: 'Groq'
 	};
 
-	const IMAGE_PROVIDERS: AIProvider[] = ['openai', 'anthropic'];
-
 	let availableProviders = $state<AIProvider[]>([]);
 	let selectedProvider = $state<AIProvider | null>(null);
 	let prompt = $state('');
@@ -39,11 +37,9 @@
 	let imageBase64 = $state('');
 	let generating = $state(false);
 	let result = $state<AIGenerationResult | null>(null);
+	// Mutable card list so user can remove before inserting
+	let editableCards = $state<Array<{ front_text: string; back_text: string }>>([]);
 	let error = $state('');
-
-	const supportsImage = $derived(
-		selectedProvider !== null && IMAGE_PROVIDERS.includes(selectedProvider)
-	);
 
 	onMount(() => {
 		availableProviders = getAvailableProviders();
@@ -55,6 +51,7 @@
 		generating = true;
 		error = '';
 		result = null;
+		editableCards = [];
 		try {
 			result = await generateContent({
 				provider: selectedProvider,
@@ -65,11 +62,21 @@
 				outputType,
 				flashcardCount: outputType === 'flashcards' ? flashcardCount : undefined
 			});
+			if (result.outputType === 'flashcards') {
+				const cards = result.data.flashcards;
+				editableCards = Array.isArray(cards)
+					? (cards as Array<{ front_text: string; back_text: string }>).map((c) => ({ ...c }))
+					: [];
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Generation failed.';
 		} finally {
 			generating = false;
 		}
+	}
+
+	function removeCard(index: number) {
+		editableCards = editableCards.filter((_, i) => i !== index);
 	}
 
 	function handleImageChange(e: Event) {
@@ -85,16 +92,18 @@
 
 	function handleInsert() {
 		if (!result) return;
-		onInsert(result);
+		if (result.outputType === 'flashcards') {
+			onInsert({ ...result, data: { flashcards: editableCards } });
+		} else {
+			onInsert(result);
+		}
 		onClose();
 	}
 
-	function getFlashcards(): Array<{ front_text: string; back_text: string }> {
-		if (!result || result.outputType !== 'flashcards') return [];
-		const cards = result.data.flashcards;
-		if (!Array.isArray(cards)) return [];
-		return cards as Array<{ front_text: string; back_text: string }>;
-	}
+	const canInsert = $derived(
+		result !== null &&
+		(result.outputType !== 'flashcards' || editableCards.length > 0)
+	);
 </script>
 
 {#if isOpen}
@@ -231,38 +240,39 @@
 						{/if}
 					</div>
 
-					<!-- Image attachment (OpenAI + Anthropic only) -->
-					{#if supportsImage}
-						<div class="flex flex-col gap-1.5">
-							{#if imageBase64}
-								<div class="flex items-center gap-3">
-									<img
-										src="data:image/jpeg;base64,{imageBase64}"
-										alt="Reference"
-										class="h-14 w-14 rounded-lg border border-[var(--color-surface-700)] object-cover"
-									/>
+					<!-- Image attachment (all providers) -->
+					<div class="flex flex-col gap-1.5">
+						{#if imageBase64}
+							<div class="flex items-center gap-3">
+								<img
+									src="data:image/jpeg;base64,{imageBase64}"
+									alt="Reference"
+									class="h-14 w-14 rounded-lg border border-[var(--color-surface-700)] object-cover"
+								/>
+								<div class="flex flex-col gap-0.5">
+									<span class="text-xs text-[var(--color-text-secondary)]">Reference image attached</span>
 									<button
 										type="button"
 										onclick={() => (imageBase64 = '')}
-										class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-error-400)] transition-colors"
+										class="self-start text-xs text-[var(--color-text-muted)] hover:text-[var(--color-error-400)] transition-colors"
 									>
-										Remove image
+										Remove
 									</button>
 								</div>
-							{:else}
-								<label class="flex cursor-pointer items-center gap-1.5 self-start text-xs
-								              text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
-									<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-										<rect x="3" y="3" width="18" height="18" rx="2"/>
-										<circle cx="8.5" cy="8.5" r="1.5"/>
-										<polyline points="21 15 16 10 5 21"/>
-									</svg>
-									Attach reference image
-									<input type="file" accept="image/*" onchange={handleImageChange} class="hidden" />
-								</label>
-							{/if}
-						</div>
-					{/if}
+							</div>
+						{:else}
+							<label class="flex cursor-pointer items-center gap-1.5 self-start text-xs
+							              text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
+								<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+									<rect x="3" y="3" width="18" height="18" rx="2"/>
+									<circle cx="8.5" cy="8.5" r="1.5"/>
+									<polyline points="21 15 16 10 5 21"/>
+								</svg>
+								Attach reference image
+								<input type="file" accept="image/*" onchange={handleImageChange} class="hidden" />
+							</label>
+						{/if}
+					</div>
 
 					<!-- Generate button -->
 					<button
@@ -342,21 +352,37 @@
 								</div>
 
 							{:else if result.outputType === 'flashcards'}
-								{@const cards = getFlashcards()}
-								<p class="text-xs text-[var(--color-text-muted)]">
-									{cards.length} {cards.length !== 1 ? 'cards' : 'card'} generated
-								</p>
-								<div class="flex max-h-48 flex-col gap-2 overflow-y-auto">
-									{#each cards as card, i}
-										<div class="rounded-lg border border-[var(--color-surface-700)]
+								<div class="flex items-center justify-between">
+									<p class="text-xs text-[var(--color-text-muted)]">
+										{editableCards.length} {editableCards.length !== 1 ? 'cards' : 'card'}
+									</p>
+									{#if editableCards.length === 0}
+										<p class="text-xs text-[var(--color-error-400)]">All cards removed</p>
+									{/if}
+								</div>
+								<div class="flex max-h-52 flex-col gap-2 overflow-y-auto">
+									{#each editableCards as card, i (i)}
+										<div class="group flex items-start gap-3 rounded-lg border border-[var(--color-surface-700)]
 										            bg-[var(--color-surface-800)] px-3 py-2">
-											<p class="mb-0.5 text-xs font-semibold text-[var(--color-text-muted)]">#{i + 1}</p>
-											<p class="text-xs text-[var(--color-text-secondary)]">
-												<span class="text-[var(--color-text-muted)]">Front:</span> {card.front_text}
-											</p>
-											<p class="text-xs text-[var(--color-text-secondary)]">
-												<span class="text-[var(--color-text-muted)]">Back:</span> {card.back_text}
-											</p>
+											<div class="flex flex-1 flex-col gap-0.5 min-w-0">
+												<p class="text-xs text-[var(--color-text-secondary)]">
+													<span class="text-[var(--color-text-muted)]">Front:</span> {card.front_text}
+												</p>
+												<p class="text-xs text-[var(--color-text-secondary)]">
+													<span class="text-[var(--color-text-muted)]">Back:</span> {card.back_text}
+												</p>
+											</div>
+											<button
+												type="button"
+												onclick={() => removeCard(i)}
+												aria-label="Remove card"
+												class="mt-0.5 shrink-0 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100
+												       hover:text-[var(--color-error-400)] transition-all"
+											>
+												<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+													<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+												</svg>
+											</button>
 										</div>
 									{/each}
 								</div>
@@ -365,8 +391,10 @@
 							<button
 								type="button"
 								onclick={handleInsert}
+								disabled={!canInsert}
 								class="self-start rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm
-								       font-medium text-white hover:bg-[var(--color-accent-400)] transition-colors"
+								       font-medium text-white hover:bg-[var(--color-accent-400)]
+								       disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
 							>
 								Insert
 							</button>
