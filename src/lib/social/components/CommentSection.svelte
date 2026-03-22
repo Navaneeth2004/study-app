@@ -69,10 +69,43 @@
 		});
 	}
 
+	/** Update vote counts in-place — no full page reload */
 	async function handleVote(id: string, vote: 1 | -1) {
-		await voteComment(id, vote);
-		// Re-fetch to get accurate vote counts and re-sort
-		await loadComments(1);
+		const uid = pb.authStore.record?.id ?? '';
+
+		// Optimistically find the comment/reply and determine current vote state
+		function updateVoteInList(list: Comment[]): Comment[] {
+			return list.map((c) => {
+				if (c.id === id) {
+					const wasVote = c.userVote;
+					const removing = wasVote === vote; // same vote = toggle off
+					const wasOpposite = wasVote !== null && wasVote !== vote;
+					return {
+						...c,
+						userVote: removing ? null : vote,
+						upvotes: vote === 1
+							? (removing ? c.upvotes - 1 : wasOpposite ? c.upvotes + 1 : c.upvotes + 1)
+							: (wasOpposite ? c.upvotes - 1 : c.upvotes),
+						downvotes: vote === -1
+							? (removing ? c.downvotes - 1 : wasOpposite ? c.downvotes + 1 : c.downvotes + 1)
+							: (wasOpposite ? c.downvotes - 1 : c.downvotes)
+					};
+				}
+				if (c.replies) return { ...c, replies: updateVoteInList(c.replies) };
+				return c;
+			});
+		}
+
+		// Optimistic update first (instant UI)
+		comments = updateVoteInList(comments);
+
+		// Then persist
+		try {
+			await voteComment(id, vote);
+		} catch (e) {
+			// Roll back on failure by re-fetching
+			await loadComments(1);
+		}
 	}
 </script>
 

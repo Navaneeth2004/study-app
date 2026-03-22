@@ -48,7 +48,16 @@
 				authorName = (u.name as string) || (u.email as string) || '';
 			} catch { authorName = ''; }
 			const isFork = !!(r.forkedFrom as string);
-			isInstalled = (r.owner as string) !== user?.id && !isFork;
+			const isNotMine = (r.owner as string) !== user?.id && !isFork;
+			if (isNotMine && user?.id) {
+				const installs = await pb.collection('installs').getFullList({
+					requestKey: null,
+					filter: `user = "${user.id}" && contentId = "${textbookId}" && contentType = "textbook"`
+				});
+				isInstalled = installs.length > 0;
+			} else {
+				isInstalled = false;
+			}
 			chapters = await listChapters(textbookId);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load textbook.';
