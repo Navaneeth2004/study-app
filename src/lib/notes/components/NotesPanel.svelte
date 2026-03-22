@@ -29,8 +29,7 @@
 	});
 
 	async function loadNote() {
-		loading = true;
-		error = '';
+		loading = true; error = '';
 		try {
 			note = await getNoteForChapter(chapterId);
 			content = note?.content ?? '';
@@ -42,8 +41,7 @@
 
 	async function handleSave() {
 		if (!isDirty) return;
-		saving = true;
-		error = '';
+		saving = true; error = '';
 		try {
 			note = await saveNote(chapterId, content);
 			savedContent = content;
@@ -53,14 +51,10 @@
 	}
 
 	async function handleDelete() {
-		saving = true;
-		error = '';
+		saving = true; error = '';
 		try {
 			await deleteNote(chapterId);
-			note = null;
-			content = '';
-			savedContent = '';
-			confirmDelete = false;
+			note = null; content = ''; savedContent = ''; confirmDelete = false;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not delete note.';
 		} finally { saving = false; }
@@ -81,26 +75,22 @@
 	onStay={() => (showDiscard = false)}
 />
 
-<!-- Backdrop -->
+<!-- Backdrop (mobile only) -->
 {#if isOpen}
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div
-		class="fixed inset-0 z-40 bg-black/40 lg:hidden"
-		onclick={attemptClose}
-	></div>
+	<div class="fixed inset-0 z-40 bg-black/40 lg:hidden" onclick={attemptClose}></div>
 {/if}
 
-<!-- Panel -->
+<!-- Panel — sits below the topbar (top: 4rem = h-16) -->
 <div
-	class="fixed right-0 top-0 z-40 flex h-full w-full max-w-xs flex-col border-l
-	       border-[var(--color-surface-700)] bg-[var(--color-surface-950)] shadow-2xl
-	       transition-transform duration-300
+	class="fixed right-0 z-40 flex flex-col border-l border-[var(--color-surface-700)]
+	       bg-[var(--color-surface-950)] shadow-2xl transition-transform duration-300
 	       {isOpen ? 'translate-x-0' : 'translate-x-full'}"
-	style="top: 4rem;" 
+	style="top: 4rem; bottom: 0; width: min(320px, 100vw);"
 >
 	<!-- Header -->
-	<div class="flex items-center justify-between border-b border-[var(--color-surface-700)] px-5 py-4">
+	<div class="flex shrink-0 items-center justify-between border-b border-[var(--color-surface-700)] px-5 py-4">
 		<div class="flex items-center gap-2">
 			<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 			     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
@@ -109,7 +99,6 @@
 				<polyline points="14 2 14 8 20 8"/>
 				<line x1="16" y1="13" x2="8" y2="13"/>
 				<line x1="16" y1="17" x2="8" y2="17"/>
-				<polyline points="10 9 9 9 8 9"/>
 			</svg>
 			<span class="text-sm font-semibold text-[var(--color-text-primary)]">My Notes</span>
 		</div>
@@ -125,7 +114,7 @@
 		</button>
 	</div>
 
-	<!-- Body -->
+	<!-- Scrollable body -->
 	<div class="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
 		{#if loading}
 			<div class="h-24 rounded-xl bg-[var(--color-surface-800)]"></div>
@@ -139,11 +128,11 @@
 			<textarea
 				bind:value={content}
 				placeholder="Write your notes here…"
-				rows={10}
-				class="w-full flex-1 resize-none rounded-xl border border-[var(--color-surface-700)]
+				class="w-full resize-none rounded-xl border border-[var(--color-surface-700)]
 				       bg-[var(--color-surface-800)] p-3 text-sm text-[var(--color-text-primary)]
 				       placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-500)]
 				       focus:outline-none transition-colors"
+				style="min-height: 160px; flex: 1;"
 			></textarea>
 
 			<div class="flex items-center justify-between">
@@ -159,8 +148,8 @@
 		{/if}
 	</div>
 
-	<!-- Footer actions -->
-	<div class="flex items-center gap-2 border-t border-[var(--color-surface-700)] p-4">
+	<!-- Footer — always visible at bottom -->
+	<div class="flex shrink-0 items-center gap-2 border-t border-[var(--color-surface-700)] p-4">
 		<button
 			onclick={handleSave}
 			disabled={saving || !isDirty || loading}
@@ -180,7 +169,8 @@
 					       text-[var(--color-text-secondary)] hover:text-[var(--color-error-400)] transition-colors"
 				>
 					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-						<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+						<polyline points="3 6 5 6 21 6"/>
+						<path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
 					</svg>
 				</button>
 			{:else}

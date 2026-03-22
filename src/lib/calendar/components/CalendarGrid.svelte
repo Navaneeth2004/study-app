@@ -30,12 +30,12 @@
 		{/each}
 	</div>
 
-	<!-- Day cells -->
+	<!-- Day cells — min-h reduced from 52px to 38px -->
 	<div class="grid grid-cols-7 gap-1">
 		{#each days as day (day.date)}
 			<button
 				onclick={() => !day.isFuture && onDayClick(day)}
-				class="relative flex flex-col items-center rounded-lg py-1.5 px-1 min-h-[52px]
+				class="relative flex flex-col items-center rounded-lg py-1 px-1 min-h-[38px]
 				       transition-colors text-xs
 				       {day.isPadding
 					? 'opacity-30 cursor-default'
@@ -65,9 +65,9 @@
 				<!-- Log indicator -->
 				{#if day.log && !day.isPadding}
 					{#if day.log.mood}
-						<span class="text-[10px] leading-none mt-0.5">{MOOD_EMOJI[day.log.mood]}</span>
+						<span class="text-[9px] leading-none mt-0.5">{MOOD_EMOJI[day.log.mood]}</span>
 					{:else}
-						<span class="mt-1 h-1.5 w-1.5 rounded-full bg-[var(--color-accent-500)]"></span>
+						<span class="mt-0.5 h-1.5 w-1.5 rounded-full bg-[var(--color-accent-500)]"></span>
 					{/if}
 				{/if}
 			</button>

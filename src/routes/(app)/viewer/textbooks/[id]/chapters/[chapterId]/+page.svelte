@@ -82,10 +82,12 @@
 	{:else if error}
 		<p class="text-sm text-[var(--color-error-400)]">{error}</p>
 	{:else if chapter}
-		<!-- Header with title, bookmark + notes buttons -->
-		<div class="flex items-center justify-between gap-3">
-			<h1 class="font-display text-3xl text-[var(--color-text-primary)] flex-1">{chapter.title}</h1>
-			<div class="flex shrink-0 items-center gap-1">
+		<!-- Header: title on left, icon buttons on right -->
+		<div class="flex items-start justify-between gap-3">
+			<h1 class="font-display text-3xl text-[var(--color-text-primary)] flex-1 leading-tight">{chapter.title}</h1>
+
+			<!-- All action buttons in a consistent row with gap-1 -->
+			<div class="flex shrink-0 items-center gap-1 pt-1">
 				<BookmarkButton
 					contentType="chapter"
 					contentId={chapter.id}
@@ -109,11 +111,16 @@
 						<line x1="16" y1="17" x2="8" y2="17"/>
 					</svg>
 				</button>
+
+				<!-- Flashcards link separated with a subtle divider -->
 				{#if hasFlashcards}
-					<a href="/viewer/flashcards/chapter/{chapterId}"
-						class="flex shrink-0 items-center gap-2 rounded-xl border border-[var(--color-accent-500)]/50
-						       px-3 py-1.5 text-sm text-[var(--color-accent-400)] hover:bg-[var(--color-accent-500)]/10
-						       transition-colors">
+					<div class="mx-1 h-5 w-px bg-[var(--color-surface-600)]"></div>
+					<a
+						href="/viewer/flashcards/chapter/{chapterId}"
+						class="flex items-center gap-1.5 rounded-xl border border-[var(--color-accent-500)]/50
+						       px-3 py-1.5 text-sm text-[var(--color-accent-400)]
+						       hover:bg-[var(--color-accent-500)]/10 transition-colors"
+					>
 						<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
 							<rect x="2" y="4" width="14" height="10" rx="2"/><rect x="8" y="10" width="14" height="10" rx="2"/>
 						</svg>
