@@ -5,13 +5,14 @@
 		cardCount: number;
 		isOwn?: boolean;
 		authorName?: string;
+		isFork?: boolean;
+		forkedFromAuthor?: string;
 		onClick: () => void;
 	}
 
-	let { name, subtitle, cardCount, isOwn = true, authorName = '', onClick }: Props = $props();
+	let { name, subtitle, cardCount, isOwn = true, authorName = '', isFork = false, forkedFromAuthor = '', onClick }: Props = $props();
 </script>
 
-<!-- Use a button (not div) so click always registers reliably -->
 <button
 	type="button"
 	onclick={onClick}
@@ -25,7 +26,17 @@
 			{#if subtitle}
 				<p class="text-xs text-[var(--color-text-muted)] line-clamp-2 mt-0.5">{subtitle}</p>
 			{/if}
-			{#if !isOwn}
+			{#if isFork && forkedFromAuthor}
+				<div class="flex items-center gap-1.5 mt-1">
+					<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+					     stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					     class="shrink-0 text-[var(--color-text-muted)]">
+						<circle cx="12" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/>
+						<path d="M12 7v4M6 17v-2a4 4 0 014-4h4a4 4 0 014 4v2"/>
+					</svg>
+					<span class="text-xs text-[var(--color-text-muted)]">Forked from {forkedFromAuthor}</span>
+				</div>
+			{:else if !isOwn}
 				<div class="flex items-center gap-1.5 mt-1">
 					{#if authorName}
 						<span class="text-xs text-[var(--color-text-muted)]">by {authorName}</span>
@@ -37,7 +48,6 @@
 				</div>
 			{/if}
 		</div>
-		<!-- Flashcard deck icon -->
 		<div class="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg"
 		     style="background: color-mix(in srgb, var(--color-accent-500) 15%, transparent);">
 			<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"

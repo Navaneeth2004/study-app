@@ -10,8 +10,6 @@
 	import type { Textbook } from '$lib/creator/creatorTypes';
 	import type { FlashcardCategory } from '$lib/creator/flashcardTypes';
 
-	// ── Content for selector ───────────────────────────────────────────────────
-
 	let textbooks = $state<Textbook[]>([]);
 	let categories = $state<FlashcardCategory[]>([]);
 	let loadingContent = $state(true);
@@ -24,8 +22,6 @@
 		}
 	});
 
-	// ── Export name modal ──────────────────────────────────────────────────────
-
 	let showExportModal = $state(false);
 	let exportModalMode = $state<'all' | 'selected'>('all');
 	let exportFilename = $state('');
@@ -33,7 +29,6 @@
 	let exportError = $state('');
 	let exportSuccess = $state(false);
 
-	// Selection state (used in selected mode)
 	let showSelector = $state(false);
 	let selectorTab = $state<'textbooks' | 'decks'>('textbooks');
 	let selectedTextbookIds = $state<Set<string>>(new Set());
@@ -43,34 +38,24 @@
 	function openExportModal(mode: 'all' | 'selected') {
 		exportModalMode = mode;
 		const date = new Date().toISOString().slice(0, 10);
-		exportFilename = mode === 'all'
-			? `studyapp-export-${date}`
-			: `studyapp-selected-${date}`;
+		exportFilename = mode === 'all' ? `studyapp-export-${date}` : `studyapp-selected-${date}`;
 		exportError = '';
 		showExportModal = true;
 	}
 
 	async function handleExportConfirm() {
 		const fname = (exportFilename.trim() || 'studyapp-export') + '.studyapp';
-		exporting = true;
-		exportError = '';
+		exporting = true; exportError = '';
 		try {
-			if (exportModalMode === 'all') {
-				await exportAll(fname);
-			} else {
-				await exportSelected([...selectedTextbookIds], [...selectedCategoryIds], fname);
-			}
-			showExportModal = false;
-			showSelector = false;
-			selectedTextbookIds = new Set();
-			selectedCategoryIds = new Set();
+			if (exportModalMode === 'all') await exportAll(fname);
+			else await exportSelected([...selectedTextbookIds], [...selectedCategoryIds], fname);
+			showExportModal = false; showSelector = false;
+			selectedTextbookIds = new Set(); selectedCategoryIds = new Set();
 			exportSuccess = true;
 			setTimeout(() => (exportSuccess = false), 3000);
 		} catch (e) {
 			exportError = e instanceof Error ? e.message : 'Export failed.';
-		} finally {
-			exporting = false;
-		}
+		} finally { exporting = false; }
 	}
 
 	function toggleTextbook(id: string) {
@@ -95,8 +80,6 @@
 		else selectedCategoryIds = new Set();
 	}
 
-	// ── Import preview modal ───────────────────────────────────────────────────
-
 	let showImportPreview = $state(false);
 	let pendingFile = $state<File | null>(null);
 	let previewManifest = $state<Manifest | null>(null);
@@ -105,22 +88,18 @@
 	let importProgress = $state<ImportProgress | null>(null);
 	let importSummary = $state<ImportSummary | null>(null);
 	let importError = $state('');
-	let fileInputEl: HTMLInputElement;
+	// $state so Svelte tracks binding updates
+	let fileInputEl = $state<HTMLInputElement | undefined>(undefined);
 
 	async function handleFileChange(e: Event) {
 		const input = e.target as HTMLInputElement;
 		const file = input.files?.[0];
 		if (!file) return;
 		input.value = '';
-
-		previewError = '';
-		previewManifest = null;
-
+		previewError = ''; previewManifest = null;
 		try {
 			const manifest = await readManifest(file);
-			pendingFile = file;
-			previewManifest = manifest;
-			showImportPreview = true;
+			pendingFile = file; previewManifest = manifest; showImportPreview = true;
 		} catch (e) {
 			previewError = e instanceof Error ? e.message : 'Could not read file.';
 		}
@@ -128,69 +107,45 @@
 
 	async function handleImportConfirm() {
 		if (!pendingFile) return;
-		showImportPreview = false;
-		importing = true;
-		importError = '';
-		importSummary = null;
-		importProgress = null;
-
+		showImportPreview = false; importing = true; importError = '';
+		importSummary = null; importProgress = null;
 		try {
 			const summary = await importFromFile(pendingFile, (p) => (importProgress = p));
 			importSummary = summary;
 		} catch (err) {
 			importError = err instanceof Error ? err.message : 'Import failed.';
 		} finally {
-			importing = false;
-			importProgress = null;
-			pendingFile = null;
+			importing = false; importProgress = null; pendingFile = null;
 		}
 	}
 
-	function handleDone() {
-		importSummary = null;
-		goto('/settings');
-	}
+	function handleDone() { importSummary = null; goto('/settings'); }
 </script>
 
-<!-- ── Export name modal ─────────────────────────────────────────────────── -->
 {#if showExportModal}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center p-4"
-		style="background: rgba(0,0,0,0.7);"
-		role="dialog"
-		aria-modal="true"
-	>
+	<div class="fixed inset-0 z-50 flex items-center justify-center p-4"
+	     style="background: rgba(0,0,0,0.7);" role="dialog" aria-modal="true">
 		<div class="flex flex-col gap-5 rounded-2xl border border-[var(--color-surface-700)]
 		            bg-[var(--color-surface-900)] p-6 w-full max-w-sm shadow-2xl">
 			<h2 class="text-base font-semibold text-[var(--color-text-primary)]">Name your export</h2>
-
 			<div class="flex flex-col gap-1.5">
 				<label for="export-name" class="text-xs text-[var(--color-text-muted)]">File name</label>
 				<div class="flex items-center gap-1">
-					<input
-						id="export-name"
-						type="text"
-						bind:value={exportFilename}
+					<input id="export-name" type="text" bind:value={exportFilename}
 						class="flex-1 rounded-xl border border-[var(--color-surface-600)] bg-[var(--color-surface-800)]
 						       px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none
-						       focus:border-[var(--color-accent-500)] transition-colors"
-					/>
+						       focus:border-[var(--color-accent-500)] transition-colors" />
 					<span class="text-xs text-[var(--color-text-muted)] shrink-0">.studyapp</span>
 				</div>
 			</div>
-
 			{#if exportError}
 				<p class="text-xs text-[var(--color-error-400)]">{exportError}</p>
 			{/if}
-
 			<div class="flex gap-3">
-				<button
-					onclick={handleExportConfirm}
-					disabled={exporting}
+				<button onclick={handleExportConfirm} disabled={exporting}
 					class="flex-1 flex items-center justify-center gap-2 rounded-xl bg-[var(--color-accent-500)]
 					       px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-400)]
-					       disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-				>
+					       disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
 					{#if exporting}
 						<svg class="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 						Exporting…
@@ -198,12 +153,9 @@
 						Download
 					{/if}
 				</button>
-				<button
-					onclick={() => (showExportModal = false)}
-					disabled={exporting}
+				<button onclick={() => (showExportModal = false)} disabled={exporting}
 					class="rounded-xl border border-[var(--color-surface-600)] px-4 py-2 text-sm
-					       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-				>
+					       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">
 					Cancel
 				</button>
 			</div>
@@ -211,14 +163,9 @@
 	</div>
 {/if}
 
-<!-- ── Import preview modal ──────────────────────────────────────────────── -->
 {#if showImportPreview && previewManifest}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center p-4"
-		style="background: rgba(0,0,0,0.7);"
-		role="dialog"
-		aria-modal="true"
-	>
+	<div class="fixed inset-0 z-50 flex items-center justify-center p-4"
+	     style="background: rgba(0,0,0,0.7);" role="dialog" aria-modal="true">
 		<div class="flex flex-col gap-5 rounded-2xl border border-[var(--color-surface-700)]
 		            bg-[var(--color-surface-900)] p-6 w-full max-w-md shadow-2xl">
 			<div class="flex flex-col gap-1">
@@ -227,7 +174,6 @@
 					Exported by {previewManifest.exportedBy} on {new Date(previewManifest.exportedAt).toLocaleDateString()}
 				</p>
 			</div>
-
 			{#if previewManifest.textbooks.length > 0}
 				<div class="flex flex-col gap-2">
 					<p class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">
@@ -235,8 +181,7 @@
 					</p>
 					<div class="flex flex-col gap-1 max-h-32 overflow-y-auto">
 						{#each previewManifest.textbooks as tb}
-							<div class="flex items-center justify-between rounded-lg px-3 py-1.5
-							            bg-[var(--color-surface-800)]">
+							<div class="flex items-center justify-between rounded-lg px-3 py-1.5 bg-[var(--color-surface-800)]">
 								<span class="text-sm text-[var(--color-text-secondary)] truncate">{tb.title}</span>
 								<span class="shrink-0 text-xs text-[var(--color-text-muted)] ml-2">
 									{tb.chapters.length} chapter{tb.chapters.length !== 1 ? 's' : ''}
@@ -246,7 +191,6 @@
 					</div>
 				</div>
 			{/if}
-
 			{#if previewManifest.flashcard_categories.length > 0}
 				<div class="flex flex-col gap-2">
 					<p class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">
@@ -254,8 +198,7 @@
 					</p>
 					<div class="flex flex-col gap-1 max-h-32 overflow-y-auto">
 						{#each previewManifest.flashcard_categories as cat}
-							<div class="flex items-center justify-between rounded-lg px-3 py-1.5
-							            bg-[var(--color-surface-800)]">
+							<div class="flex items-center justify-between rounded-lg px-3 py-1.5 bg-[var(--color-surface-800)]">
 								<span class="text-sm text-[var(--color-text-secondary)] truncate">{cat.name}</span>
 								<span class="shrink-0 text-xs text-[var(--color-text-muted)] ml-2">
 									{cat.flashcards.length} card{cat.flashcards.length !== 1 ? 's' : ''}
@@ -265,24 +208,16 @@
 					</div>
 				</div>
 			{/if}
-
-			<p class="text-xs text-[var(--color-text-muted)]">
-				⚠ Existing content with the same title will be overwritten.
-			</p>
-
+			<p class="text-xs text-[var(--color-text-muted)]">⚠ Existing content with the same title will be overwritten.</p>
 			<div class="flex gap-3">
-				<button
-					onclick={handleImportConfirm}
+				<button onclick={handleImportConfirm}
 					class="flex-1 rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm font-medium
-					       text-white hover:bg-[var(--color-accent-400)] transition-colors"
-				>
+					       text-white hover:bg-[var(--color-accent-400)] transition-colors">
 					Import
 				</button>
-				<button
-					onclick={() => { showImportPreview = false; pendingFile = null; }}
+				<button onclick={() => { showImportPreview = false; pendingFile = null; }}
 					class="rounded-xl border border-[var(--color-surface-600)] px-4 py-2 text-sm
-					       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-				>
+					       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">
 					Cancel
 				</button>
 			</div>
@@ -290,7 +225,6 @@
 	</div>
 {/if}
 
-<!-- ── Main section ──────────────────────────────────────────────────────── -->
 <div class="flex flex-col gap-6">
 	<div class="flex flex-col gap-1">
 		<h2 class="text-lg font-semibold text-[var(--color-text-primary)]">Export & Import</h2>
@@ -303,14 +237,11 @@
 		<p class="text-sm text-[var(--color-success-500)]">Export complete — file downloaded.</p>
 	{/if}
 
-	<!-- Export buttons -->
 	<div class="flex flex-col gap-3">
 		<div class="flex gap-3 flex-wrap">
-			<button
-				onclick={() => openExportModal('all')}
+			<button onclick={() => openExportModal('all')}
 				class="flex items-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-2.5
-				       text-sm font-medium text-white hover:bg-[var(--color-accent-400)] transition-colors"
-			>
+				       text-sm font-medium text-white hover:bg-[var(--color-accent-400)] transition-colors">
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 					<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
 					<polyline points="7 10 12 15 17 10"/>
@@ -318,48 +249,33 @@
 				</svg>
 				Export All
 			</button>
-
-			<button
-				onclick={() => (showSelector = !showSelector)}
+			<button onclick={() => (showSelector = !showSelector)}
 				class="flex items-center gap-2 rounded-xl border border-[var(--color-surface-600)] px-4 py-2.5
 				       text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]
-				       hover:border-[var(--color-surface-500)] transition-colors"
-			>
+				       hover:border-[var(--color-surface-500)] transition-colors">
 				Export Selected
 			</button>
 		</div>
 
-		<!-- Selection panel -->
 		{#if showSelector}
-			<div class="flex flex-col gap-4 rounded-xl border border-[var(--color-surface-700)]
-			            bg-[var(--color-surface-900)] p-4">
+			<div class="flex flex-col gap-4 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] p-4">
 				<div class="flex gap-1 border-b border-[var(--color-surface-700)]">
-					<button
-						onclick={() => (selectorTab = 'textbooks')}
+					<button onclick={() => (selectorTab = 'textbooks')}
 						class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors
-						       {selectorTab === 'textbooks'
-							? 'border-[var(--color-accent-500)] text-[var(--color-accent-400)]'
-							: 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-					>
+						       {selectorTab === 'textbooks' ? 'border-[var(--color-accent-500)] text-[var(--color-accent-400)]' : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}">
 						Textbooks ({textbooks.length})
 					</button>
-					<button
-						onclick={() => (selectorTab = 'decks')}
+					<button onclick={() => (selectorTab = 'decks')}
 						class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors
-						       {selectorTab === 'decks'
-							? 'border-[var(--color-accent-500)] text-[var(--color-accent-400)]'
-							: 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-					>
+						       {selectorTab === 'decks' ? 'border-[var(--color-accent-500)] text-[var(--color-accent-400)]' : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}">
 						Flashcard Decks ({categories.length})
 					</button>
 				</div>
-
 				<div class="flex gap-2">
 					<button onclick={selectAllInTab} class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">Select All</button>
 					<span class="text-xs text-[var(--color-text-muted)]">·</span>
 					<button onclick={deselectAllInTab} class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">Deselect All</button>
 				</div>
-
 				{#if loadingContent}
 					<p class="text-sm text-[var(--color-text-muted)]">Loading…</p>
 				{:else if selectorTab === 'textbooks'}
@@ -389,14 +305,10 @@
 						</div>
 					{/if}
 				{/if}
-
-				<button
-					onclick={() => { if (selectedCount > 0) openExportModal('selected'); }}
+				<button onclick={() => { if (selectedCount > 0) openExportModal('selected'); }}
 					disabled={selectedCount === 0}
 					class="self-start rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm font-medium
-					       text-white hover:bg-[var(--color-accent-400)] disabled:opacity-50
-					       disabled:cursor-not-allowed transition-colors"
-				>
+					       text-white hover:bg-[var(--color-accent-400)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
 					Export{selectedCount > 0 ? ` (${selectedCount} item${selectedCount !== 1 ? 's' : ''})` : ''}
 				</button>
 			</div>
@@ -405,7 +317,6 @@
 
 	<div class="border-t border-[var(--color-surface-700)]"></div>
 
-	<!-- Import -->
 	<div class="flex flex-col gap-3">
 		<div class="flex flex-col gap-1">
 			<h3 class="text-sm font-medium text-[var(--color-text-primary)]">Import</h3>
@@ -435,18 +346,12 @@
 				</div>
 			</div>
 		{:else}
-			{#if importError}
-				<p class="text-sm text-[var(--color-error-400)]">{importError}</p>
-			{/if}
-			{#if previewError}
-				<p class="text-sm text-[var(--color-error-400)]">{previewError}</p>
-			{/if}
-			<button
-				onclick={() => fileInputEl.click()}
+			{#if importError}<p class="text-sm text-[var(--color-error-400)]">{importError}</p>{/if}
+			{#if previewError}<p class="text-sm text-[var(--color-error-400)]">{previewError}</p>{/if}
+			<button onclick={() => fileInputEl?.click()}
 				class="flex items-center gap-2 self-start rounded-xl border border-[var(--color-surface-600)]
 				       px-4 py-2.5 text-sm font-medium text-[var(--color-text-secondary)]
-				       hover:text-[var(--color-text-primary)] hover:border-[var(--color-surface-500)] transition-colors"
-			>
+				       hover:text-[var(--color-text-primary)] hover:border-[var(--color-surface-500)] transition-colors">
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 					<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
 					<polyline points="17 8 12 3 7 8"/>

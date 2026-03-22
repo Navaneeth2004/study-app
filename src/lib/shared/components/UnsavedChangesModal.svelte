@@ -18,10 +18,7 @@
 
 {#if isOpen}
 	<div class="fixed inset-0 {zClass} flex items-center justify-center p-4">
-		<!-- Backdrop -->
 		<div class="absolute inset-0 bg-black/70" aria-hidden="true"></div>
-
-		<!-- Modal -->
 		<div
 			class="relative w-full max-w-sm rounded-2xl border border-[var(--color-surface-700)]
 			       bg-[var(--color-surface-900)] p-6 shadow-2xl"
@@ -35,7 +32,6 @@
 						You have unsaved changes. Save before leaving?
 					</p>
 				</div>
-
 				<div class="flex flex-col gap-2">
 					<button
 						onclick={handleSaveAndLeave}

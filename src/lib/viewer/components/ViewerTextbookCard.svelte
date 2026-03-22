@@ -6,10 +6,12 @@
 		chapterCount?: number;
 		isOwn?: boolean;
 		authorName?: string;
+		isFork?: boolean;
+		forkedFromAuthor?: string;
 		onClick: () => void;
 	}
 
-	let { textbook, chapterCount, isOwn = true, authorName = '', onClick }: Props = $props();
+	let { textbook, chapterCount, isOwn = true, authorName = '', isFork = false, forkedFromAuthor = '', onClick }: Props = $props();
 </script>
 
 <div
@@ -19,7 +21,6 @@
 	onkeydown={(e) => e.key === 'Enter' && onClick()}
 	class="app-card app-card-clickable"
 >
-	<!-- Top row: title + icon -->
 	<div class="flex items-start justify-between gap-3">
 		<div class="flex flex-col gap-1 min-w-0 flex-1">
 			<span class="app-card-title leading-snug">
@@ -30,7 +31,19 @@
 					{textbook.description}
 				</p>
 			{/if}
-			{#if !isOwn}
+			{#if isFork && forkedFromAuthor}
+				<!-- Forked — you own it but it came from someone else -->
+				<div class="flex items-center gap-1.5 mt-1">
+					<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+					     stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+					     class="shrink-0 text-[var(--color-text-muted)]">
+						<circle cx="12" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/>
+						<path d="M12 7v4M6 17v-2a4 4 0 014-4h4a4 4 0 014 4v2"/>
+					</svg>
+					<span class="text-xs text-[var(--color-text-muted)]">Forked from {forkedFromAuthor}</span>
+				</div>
+			{:else if !isOwn}
+				<!-- Installed — not owned by you -->
 				<div class="flex items-center gap-1.5 mt-1">
 					{#if authorName}
 						<span class="text-xs text-[var(--color-text-muted)]">by {authorName}</span>
@@ -42,7 +55,6 @@
 				</div>
 			{/if}
 		</div>
-		<!-- Book icon -->
 		<div class="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg"
 		     style="background: color-mix(in srgb, var(--color-accent-500) 15%, transparent);">
 			<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -53,8 +65,6 @@
 			</svg>
 		</div>
 	</div>
-
-	<!-- Bottom: count -->
 	{#if chapterCount !== undefined}
 		<span class="text-xs text-[var(--color-text-muted)] mt-auto">
 			{chapterCount} {chapterCount === 1 ? 'chapter' : 'chapters'}

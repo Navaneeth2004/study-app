@@ -43,7 +43,8 @@ export async function listByChapter(chapterId: string): Promise<Flashcard[]> {
 	try {
 		const records = await pb.collection('flashcards').getFullList({
 			filter: `chapter = "${chapterId}"`,
-			sort: 'order'
+			sort: 'order',
+			requestKey: null
 		});
 		return records.map(toFlashcard);
 	} catch (e) {
@@ -56,7 +57,8 @@ export async function listByCategory(categoryId: string): Promise<Flashcard[]> {
 	try {
 		const records = await pb.collection('flashcards').getFullList({
 			filter: `category = "${categoryId}"`,
-			sort: 'order'
+			sort: 'order',
+			requestKey: null
 		});
 		return records.map(toFlashcard);
 	} catch (e) {
@@ -183,7 +185,7 @@ export async function deleteCategory(id: string): Promise<void> {
 
 export async function getCategory(id: string): Promise<FlashcardCategory> {
 	try {
-		const r = await pb.collection('flashcard_categories').getOne(id);
+		const r = await pb.collection('flashcard_categories').getOne(id, { requestKey: null });
 		return toCategory(r);
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);

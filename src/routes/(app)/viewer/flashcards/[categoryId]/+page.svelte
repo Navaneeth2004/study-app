@@ -1,23 +1,34 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { listFlashcardsByCategory, listMyCategories } from '$lib/viewer/viewerService';
+	import { goto } from '$app/navigation';
+	import { pb } from '$lib/shared/pocketbase';
+	import { getCurrentUser } from '$lib/auth/authService';
+	import { listFlashcardsByCategory } from '$lib/viewer/viewerService';
 	import FlipCard from '$lib/shared/components/FlipCard.svelte';
 	import FlashcardListItem from '$lib/viewer/components/FlashcardListItem.svelte';
 	import FlashcardViewModal from '$lib/viewer/components/FlashcardViewModal.svelte';
 	import EmptyState from '$lib/shared/components/EmptyState.svelte';
+	import BookmarkButton from '$lib/shared/components/BookmarkButton.svelte';
+	import ForkModal from '$lib/shared/components/ForkModal.svelte';
+	import ForkProgressModal from '$lib/shared/components/ForkProgressModal.svelte';
+	import { forkCategory } from '$lib/sharing/forkService';
 	import {
 		quizSession, currentCard, isComplete, progress, summary,
 		startQuiz, rateCard, restartWithFailed, resetQuiz
 	} from '$lib/viewer/quizStore';
 	import type { Flashcard } from '$lib/creator/flashcardTypes';
+	import type { ForkProgress } from '$lib/sharing/forkTypes';
 	import type { Rating } from '$lib/viewer/viewerTypes';
 
 	const categoryId = $derived($page.params.categoryId as string);
+	const user = getCurrentUser();
 
 	type Screen = 'browse' | 'select' | 'quiz' | 'results';
 
 	let categoryName = $state('');
+	let authorName = $state('');
+	let isInstalled = $state(false);
 	let allCards = $state<Flashcard[]>([]);
 	let selectedIds = $state<Set<string>>(new Set());
 	let screen = $state<Screen>('browse');
@@ -25,25 +36,31 @@
 	let loading = $state(true);
 	let error = $state('');
 
+	let showForkModal = $state(false);
+	let forkRunning = $state(false);
+	let forkProgress = $state<ForkProgress | null>(null);
+	let forkError = $state<string | null>(null);
+	let pendingForkId = $state('');
+
 	const selectedCards = $derived(allCards.filter((c) => selectedIds.has(c.id)));
 	const failedCount = $derived($summary.incorrect + $summary.partial);
 
 	onMount(async () => {
-		loading = true;
-		resetQuiz();
+		loading = true; resetQuiz();
 		try {
-			const [categories, cards] = await Promise.all([
-				listMyCategories(),
-				listFlashcardsByCategory(categoryId)
-			]);
-			categoryName = categories.find((c) => c.id === categoryId)?.name ?? 'Flashcards';
-			allCards = cards;
+			const r = await pb.collection('flashcard_categories').getOne(categoryId, { requestKey: null });
+			categoryName = r.name as string;
+			try {
+				const u = await pb.collection('users').getOne(r.owner as string, { requestKey: null });
+				authorName = (u.name as string) || (u.email as string) || '';
+			} catch { authorName = ''; }
+			const isFork = !!(r.forkedFrom as string);
+			isInstalled = (r.owner as string) !== user?.id && !isFork;
+			allCards = await listFlashcardsByCategory(categoryId);
 			selectedIds = new Set();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load flashcards.';
-		} finally {
-			loading = false;
-		}
+		} finally { loading = false; }
 	});
 
 	function toggleCard(id: string) {
@@ -51,14 +68,26 @@
 		if (next.has(id)) next.delete(id); else next.add(id);
 		selectedIds = next;
 	}
-
 	function selectAll() { selectedIds = new Set(allCards.map((c) => c.id)); }
 	function deselectAll() { selectedIds = new Set(); }
-
 	function handleStartQuiz() { startQuiz(selectedCards); screen = 'quiz'; }
 	function handleRate(rating: Rating) { rateCard(rating); if ($isComplete) screen = 'results'; }
 	function handleRetry() { restartWithFailed(); screen = 'quiz'; }
 	function handleBackToDeck() { resetQuiz(); screen = 'browse'; }
+
+	async function handleForkConfirm(newTitle: string) {
+		showForkModal = false; forkRunning = true;
+		forkProgress = { step: 0, total: 1, message: 'Starting…' };
+		forkError = null; pendingForkId = '';
+		try {
+			pendingForkId = await forkCategory(categoryId, newTitle, (p) => { forkProgress = p; });
+		} catch (e) { forkError = e instanceof Error ? e.message : 'Fork failed.'; }
+	}
+
+	function handleForkDone() {
+		forkRunning = false;
+		if (pendingForkId) goto(`/viewer/flashcards/category/${pendingForkId}`);
+	}
 </script>
 
 <svelte:head>
@@ -66,6 +95,9 @@
 </svelte:head>
 
 <FlashcardViewModal flashcard={viewingCard} onClose={() => (viewingCard = null)} />
+<ForkModal isOpen={showForkModal} contentType="category" originalTitle={categoryName}
+	originalAuthor={authorName} onConfirm={handleForkConfirm} onClose={() => (showForkModal = false)} />
+<ForkProgressModal isOpen={forkRunning} progress={forkProgress} error={forkError} onDone={handleForkDone} />
 
 <div class="flex flex-col gap-6 max-w-2xl">
 	<nav class="flex items-center gap-2 text-sm flex-wrap">
@@ -85,18 +117,41 @@
 
 	{:else if screen === 'browse'}
 		<div class="flex items-center justify-between gap-4">
-			<h1 class="font-display text-2xl text-[var(--color-text-primary)]">{categoryName}</h1>
-			<button
-				onclick={() => (screen = 'select')}
+			<div class="flex items-center gap-2 flex-1 min-w-0">
+				<h1 class="font-display text-2xl text-[var(--color-text-primary)] truncate">{categoryName}</h1>
+				<BookmarkButton contentType="flashcard_category" contentId={categoryId} contentTitle={categoryName} />
+			</div>
+			<button onclick={() => (screen = 'select')}
 				class="shrink-0 rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm font-medium
-				       text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)] transition-colors"
-			>
+				       text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)] transition-colors">
 				Start Test
 			</button>
 		</div>
+
+		{#if isInstalled}
+			<div class="flex items-center justify-between gap-4 rounded-xl border border-[var(--color-surface-700)]
+			            bg-[var(--color-surface-900)] px-4 py-3">
+				<div class="flex flex-col gap-0.5">
+					<p class="text-sm font-medium text-[var(--color-text-secondary)]">Installed content — read only</p>
+					<p class="text-xs text-[var(--color-text-muted)]">Duplicate to make edits, share or export.</p>
+				</div>
+				<button onclick={() => (showForkModal = true)}
+					class="flex shrink-0 items-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-2
+					       text-sm font-medium text-white hover:bg-[var(--color-accent-400)] transition-colors">
+					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<circle cx="12" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/>
+						<path d="M12 7v4M6 17v-2a4 4 0 014-4h4a4 4 0 014 4v2"/>
+					</svg>
+					Duplicate
+				</button>
+			</div>
+		{/if}
+
 		<div class="flex flex-col gap-2">
 			{#each allCards as card (card.id)}
-				<FlashcardListItem flashcard={card} showCheckbox={false} onClick={(c) => (viewingCard = c)} />
+				<FlashcardListItem flashcard={card} showCheckbox={false}
+					categoryName={categoryName}
+					onClick={(c) => (viewingCard = c)} />
 			{/each}
 		</div>
 
@@ -138,42 +193,21 @@
 			<div style="display:flex; flex-direction:column; align-items:center; width:100%; max-width:640px; gap:1rem;">
 				{#if $currentCard}
 					<div style="width:100%;">
-						<FlipCard
-							frontText={$currentCard.frontText}
-							frontImageUrl={$currentCard.frontImageUrl}
-							frontAudioUrl={$currentCard.frontAudioUrl}
-							backText={$currentCard.backText}
-							backImageUrl={$currentCard.backImageUrl}
-							backAudioUrl={$currentCard.backAudioUrl}
-						/>
+						<FlipCard frontText={$currentCard.frontText} frontImageUrl={$currentCard.frontImageUrl}
+							frontAudioUrl={$currentCard.frontAudioUrl} backText={$currentCard.backText}
+							backImageUrl={$currentCard.backImageUrl} backAudioUrl={$currentCard.backAudioUrl} />
 					</div>
 				{/if}
 				<div class="grid grid-cols-3 gap-3" style="width:100%;">
-					<button onclick={() => handleRate('incorrect')}
-						class="flex flex-col items-center gap-1.5 rounded-xl border border-[var(--color-error-500)]/30
-						       bg-[var(--color-error-500)]/10 py-3 text-xs font-medium text-[var(--color-error-400)]
-						       hover:bg-[var(--color-error-500)]/20 transition-colors">
-						<span class="text-lg">✗</span>Incorrect
-					</button>
-					<button onclick={() => handleRate('partial')}
-						class="flex flex-col items-center gap-1.5 rounded-xl border border-[var(--color-warning-500)]/30
-						       bg-[var(--color-warning-500)]/10 py-3 text-xs font-medium text-[var(--color-warning-400)]
-						       hover:bg-[var(--color-warning-500)]/20 transition-colors">
-						<span class="text-lg">~</span>Partial
-					</button>
-					<button onclick={() => handleRate('correct')}
-						class="flex flex-col items-center gap-1.5 rounded-xl border border-[var(--color-success-500)]/30
-						       bg-[var(--color-success-500)]/10 py-3 text-xs font-medium text-[var(--color-success-500)]
-						       hover:bg-[var(--color-success-500)]/20 transition-colors">
-						<span class="text-lg">✓</span>Correct
-					</button>
+					<button onclick={() => handleRate('incorrect')} class="flex flex-col items-center gap-1.5 rounded-xl border border-[var(--color-error-500)]/30 bg-[var(--color-error-500)]/10 py-3 text-xs font-medium text-[var(--color-error-400)] hover:bg-[var(--color-error-500)]/20 transition-colors"><span class="text-lg">✗</span>Incorrect</button>
+					<button onclick={() => handleRate('partial')} class="flex flex-col items-center gap-1.5 rounded-xl border border-[var(--color-warning-500)]/30 bg-[var(--color-warning-500)]/10 py-3 text-xs font-medium text-[var(--color-warning-400)] hover:bg-[var(--color-warning-500)]/20 transition-colors"><span class="text-lg">~</span>Partial</button>
+					<button onclick={() => handleRate('correct')} class="flex flex-col items-center gap-1.5 rounded-xl border border-[var(--color-success-500)]/30 bg-[var(--color-success-500)]/10 py-3 text-xs font-medium text-[var(--color-success-500)] hover:bg-[var(--color-success-500)]/20 transition-colors"><span class="text-lg">✓</span>Correct</button>
 				</div>
 			</div>
 		</div>
 
 	{:else if screen === 'results'}
-		<div class="flex flex-col gap-6 rounded-xl border border-[var(--color-surface-700)]
-		            bg-[var(--color-surface-900)] p-8 max-w-xl mx-auto w-full">
+		<div class="flex flex-col gap-6 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] p-8 max-w-xl mx-auto w-full">
 			<div class="flex flex-col gap-1 text-center">
 				<h2 class="font-display text-2xl text-[var(--color-text-primary)]">Quiz Complete</h2>
 				<p class="text-sm text-[var(--color-text-secondary)]">{$summary.total} cards studied</p>
@@ -184,31 +218,13 @@
 				{#if $summary.incorrect > 0}<div class="bg-[var(--color-error-500)]" style="width: {($summary.incorrect / $summary.total) * 100}%"></div>{/if}
 			</div>
 			<div class="grid grid-cols-3 gap-3 text-center">
-				<div class="flex flex-col gap-0.5">
-					<span class="text-xl font-semibold text-[var(--color-success-500)]">{$summary.correct}</span>
-					<span class="text-xs text-[var(--color-text-muted)]">Correct</span>
-				</div>
-				<div class="flex flex-col gap-0.5">
-					<span class="text-xl font-semibold text-[var(--color-warning-400)]">{$summary.partial}</span>
-					<span class="text-xs text-[var(--color-text-muted)]">Partial</span>
-				</div>
-				<div class="flex flex-col gap-0.5">
-					<span class="text-xl font-semibold text-[var(--color-error-400)]">{$summary.incorrect}</span>
-					<span class="text-xs text-[var(--color-text-muted)]">Incorrect</span>
-				</div>
+				<div class="flex flex-col gap-0.5"><span class="text-xl font-semibold text-[var(--color-success-500)]">{$summary.correct}</span><span class="text-xs text-[var(--color-text-muted)]">Correct</span></div>
+				<div class="flex flex-col gap-0.5"><span class="text-xl font-semibold text-[var(--color-warning-400)]">{$summary.partial}</span><span class="text-xs text-[var(--color-text-muted)]">Partial</span></div>
+				<div class="flex flex-col gap-0.5"><span class="text-xl font-semibold text-[var(--color-error-400)]">{$summary.incorrect}</span><span class="text-xs text-[var(--color-text-muted)]">Incorrect</span></div>
 			</div>
 			<div class="flex flex-col gap-3">
-				<button onclick={handleRetry} disabled={failedCount === 0}
-					class="w-full rounded-xl bg-[var(--color-accent-500)] py-2.5 text-sm font-medium
-					       text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)]
-					       disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-					Retry Incorrect + Partial ({failedCount})
-				</button>
-				<button onclick={handleBackToDeck}
-					class="w-full rounded-xl border border-[var(--color-surface-600)] py-2.5 text-sm
-					       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">
-					Back to Deck
-				</button>
+				<button onclick={handleRetry} disabled={failedCount === 0} class="w-full rounded-xl bg-[var(--color-accent-500)] py-2.5 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Retry Incorrect + Partial ({failedCount})</button>
+				<button onclick={handleBackToDeck} class="w-full rounded-xl border border-[var(--color-surface-600)] py-2.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">Back to Deck</button>
 			</div>
 		</div>
 	{/if}

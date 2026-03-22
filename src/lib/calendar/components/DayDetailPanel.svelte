@@ -33,10 +33,11 @@
 	let confirmDelete = $state(false);
 	let error = $state('');
 
-	const originalDescription = day.log?.description ?? '';
-	const originalMood = day.log?.mood ?? null;
-	const originalDuration = day.log?.duration ?? null;
-	const originalMarked = day.log !== null;
+	// Use $derived so Svelte doesn't warn about capturing initial prop values outside reactive context
+	const originalMarked = $derived(day.log !== null);
+	const originalDescription = $derived(day.log?.description ?? '');
+	const originalMood = $derived(day.log?.mood ?? null);
+	const originalDuration = $derived(day.log?.duration ?? null);
 
 	$effect(() => {
 		const dirty =
@@ -56,7 +57,7 @@
 		error = '';
 		try {
 			await onSave({ description, mood, duration });
-			onClose(); // close modal after successful save
+			onClose();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not save.';
 		}
@@ -66,7 +67,7 @@
 		error = '';
 		try {
 			await onDelete();
-			onClose(); // close modal after successful delete
+			onClose();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not delete.';
 		}
@@ -105,10 +106,8 @@
 				Studied
 			</span>
 			{#if !day.log}
-				<button
-					onclick={() => (isMarked = false)}
-					class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
-				>
+				<button onclick={() => (isMarked = false)}
+					class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
 					Undo
 				</button>
 			{/if}
@@ -117,46 +116,33 @@
 		<div class="flex flex-col gap-3">
 			<div class="flex flex-col gap-1.5">
 				<label for="log-desc" class="text-xs font-medium text-[var(--color-text-secondary)]">What did you study?</label>
-				<textarea
-					id="log-desc"
-					bind:value={description}
-					rows={2}
+				<textarea id="log-desc" bind:value={description} rows={2}
 					placeholder="e.g. Chapter 3 of calculus, flashcard review…"
 					class="w-full resize-none rounded-xl border border-[var(--color-surface-600)]
 					       bg-[var(--color-surface-800)] px-3 py-2 text-sm
 					       text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]
-					       focus:border-[var(--color-accent-500)] focus:outline-none transition-colors"
-				></textarea>
+					       focus:border-[var(--color-accent-500)] focus:outline-none transition-colors">
+				</textarea>
 			</div>
 
 			<div class="flex flex-col gap-1.5">
 				<label for="log-duration" class="text-xs font-medium text-[var(--color-text-secondary)]">Duration (minutes)</label>
-				<input
-					id="log-duration"
-					type="number"
-					bind:value={duration}
-					min={1}
-					max={600}
-					placeholder="e.g. 45"
+				<input id="log-duration" type="number" bind:value={duration} min={1} max={600} placeholder="e.g. 45"
 					class="w-28 rounded-xl border border-[var(--color-surface-600)]
 					       bg-[var(--color-surface-800)] px-3 py-2 text-sm
 					       text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]
-					       focus:border-[var(--color-accent-500)] focus:outline-none transition-colors"
-				/>
+					       focus:border-[var(--color-accent-500)] focus:outline-none transition-colors" />
 			</div>
 
 			<div class="flex flex-col gap-1.5">
 				<span class="text-xs font-medium text-[var(--color-text-secondary)]">How was the session?</span>
 				<div class="flex gap-2">
 					{#each MOODS as m}
-						<button
-							onclick={() => (mood = mood === m.value ? null : m.value)}
-							title={m.label}
+						<button onclick={() => (mood = mood === m.value ? null : m.value)} title={m.label}
 							class="flex h-9 w-9 items-center justify-center rounded-lg border text-base transition-colors
 							       {mood === m.value
 								? 'border-[var(--color-accent-500)] bg-[var(--color-accent-500)]/15'
-								: 'border-[var(--color-surface-600)] hover:border-[var(--color-surface-500)]'}"
-						>
+								: 'border-[var(--color-surface-600)] hover:border-[var(--color-surface-500)]'}">
 							{m.emoji}
 						</button>
 					{/each}
@@ -168,38 +154,27 @@
 			{/if}
 
 			<div class="flex items-center gap-2">
-				<button
-					onclick={handleSave}
-					disabled={saving}
+				<button onclick={handleSave} disabled={saving}
 					class="rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm font-medium
 					       text-white hover:bg-[var(--color-accent-400)]
-					       disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-				>
+					       disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
 					{saving ? 'Saving…' : 'Save'}
 				</button>
-
 				{#if day.log}
 					{#if !confirmDelete}
-						<button
-							onclick={() => (confirmDelete = true)}
+						<button onclick={() => (confirmDelete = true)}
 							class="rounded-xl border border-[var(--color-surface-600)] px-4 py-2 text-sm
-							       text-[var(--color-text-secondary)] hover:text-[var(--color-error-400)] transition-colors"
-						>
+							       text-[var(--color-text-secondary)] hover:text-[var(--color-error-400)] transition-colors">
 							Delete log
 						</button>
 					{:else}
-						<button
-							onclick={handleDelete}
-							disabled={saving}
+						<button onclick={handleDelete} disabled={saving}
 							class="rounded-xl bg-[var(--color-error-500)]/15 px-3 py-2 text-sm
-							       text-[var(--color-error-400)] hover:bg-[var(--color-error-500)]/25 transition-colors"
-						>
+							       text-[var(--color-error-400)] hover:bg-[var(--color-error-500)]/25 transition-colors">
 							Confirm delete
 						</button>
-						<button
-							onclick={() => (confirmDelete = false)}
-							class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
-						>
+						<button onclick={() => (confirmDelete = false)}
+							class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
 							Cancel
 						</button>
 					{/if}
