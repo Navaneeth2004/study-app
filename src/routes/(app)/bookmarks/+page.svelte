@@ -24,11 +24,17 @@
 		return grouped.find((g) => g.folder?.id === selectedId)?.bookmarks ?? [];
 	});
 
+	/** The full name of the currently selected folder/view */
+	const selectedLabel = $derived.by(() => {
+		if (selectedId === 'all') return 'All Bookmarks';
+		if (selectedId === 'uncategorised') return 'Uncategorised';
+		return folders.find((f) => f.id === selectedId)?.name ?? '';
+	});
+
 	onMount(async () => { await load(); });
 
 	async function load() {
-		loading = true;
-		error = '';
+		loading = true; error = '';
 		try {
 			[grouped, folders] = await Promise.all([listAllBookmarks(), listFolders()]);
 		} catch (e) {
@@ -43,8 +49,7 @@
 			const f = await createFolder(newFolderName.trim());
 			folders = [...folders, f];
 			grouped = [...grouped, { folder: f, bookmarks: [] }];
-			newFolderName = '';
-			showNewFolder = false;
+			newFolderName = ''; showNewFolder = false;
 			selectedId = f.id;
 		} catch (e) { error = e instanceof Error ? e.message : 'Could not create folder.'; }
 		finally { creatingFolder = false; }
@@ -82,11 +87,7 @@
 	async function handleMoveBookmark(bm: Bookmark, folderId: string | null) {
 		try {
 			await moveBookmark(bm.id, folderId);
-			// Remove from old group, add to new
-			grouped = grouped.map((g) => ({
-				...g,
-				bookmarks: g.bookmarks.filter((b) => b.id !== bm.id)
-			}));
+			grouped = grouped.map((g) => ({ ...g, bookmarks: g.bookmarks.filter((b) => b.id !== bm.id) }));
 			const updated = { ...bm, folder: folderId };
 			grouped = grouped.map((g) => {
 				if (folderId === null && g.folder === null) return { ...g, bookmarks: [...g.bookmarks, updated] };
@@ -97,7 +98,6 @@
 	}
 
 	async function handleReorderBookmarks(reordered: Bookmark[]) {
-		// Update in grouped
 		grouped = grouped.map((g) => {
 			const ids = new Set(reordered.map((b) => b.id));
 			if (g.bookmarks.some((b) => ids.has(b.id))) return { ...g, bookmarks: reordered };
@@ -151,14 +151,13 @@
 					onDelete={handleDeleteFolder}
 					onReorder={handleReorderFolders}
 				/>
-
 				{#if showNewFolder}
 					<div class="flex flex-col gap-2 border-t border-[var(--color-surface-700)] pt-2">
 						<input
 							type="text"
 							bind:value={newFolderName}
 							placeholder="Folder name…"
-							onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') { showNewFolder = false; newFolderName = ''; }}}
+							onkeydown={(e) => { if (e.key === 'Enter') handleCreateFolder(); if (e.key === 'Escape') { showNewFolder = false; newFolderName = ''; } }}
 							autofocus
 							class="w-full rounded-lg border border-[var(--color-surface-600)]
 							       bg-[var(--color-surface-800)] px-2 py-1.5 text-sm
@@ -174,15 +173,24 @@
 							<button onclick={() => { showNewFolder = false; newFolderName = ''; }}
 								class="rounded-lg border border-[var(--color-surface-600)] px-2 py-1 text-xs
 								       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">
-								Cancel
+								✕
 							</button>
 						</div>
 					</div>
 				{/if}
 			</div>
 
-			<!-- Bookmarks list -->
-			<div class="flex-1 min-w-0">
+			<!-- Bookmarks list with folder name header -->
+			<div class="flex-1 min-w-0 flex flex-col gap-3">
+				<!-- Full folder name header -->
+				<div class="flex items-center gap-2">
+					<h2 class="text-base font-semibold text-[var(--color-text-primary)]">{selectedLabel}</h2>
+					{#if displayedBookmarks.length > 0}
+						<span class="text-sm text-[var(--color-text-muted)]">
+							({displayedBookmarks.length})
+						</span>
+					{/if}
+				</div>
 				<BookmarkList
 					bookmarks={displayedBookmarks}
 					{folders}

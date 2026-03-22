@@ -10,6 +10,8 @@
 	import FlashcardViewModal from '$lib/viewer/components/FlashcardViewModal.svelte';
 	import EmptyState from '$lib/shared/components/EmptyState.svelte';
 	import BookmarkButton from '$lib/shared/components/BookmarkButton.svelte';
+	import StarRating from '$lib/shared/components/StarRating.svelte';
+	import CommentSection from '$lib/social/components/CommentSection.svelte';
 	import ForkModal from '$lib/shared/components/ForkModal.svelte';
 	import ForkProgressModal from '$lib/shared/components/ForkProgressModal.svelte';
 	import { forkCategory } from '$lib/sharing/forkService';
@@ -29,6 +31,8 @@
 	let categoryName = $state('');
 	let authorName = $state('');
 	let isInstalled = $state(false);
+	let categoryOwnerId = $state('');
+	let isShared = $state(false);
 	let allCards = $state<Flashcard[]>([]);
 	let selectedIds = $state<Set<string>>(new Set());
 	let screen = $state<Screen>('browse');
@@ -50,12 +54,14 @@
 		try {
 			const r = await pb.collection('flashcard_categories').getOne(categoryId, { requestKey: null });
 			categoryName = r.name as string;
+			isShared = !!(r.isShared as boolean);
 			try {
 				const u = await pb.collection('users').getOne(r.owner as string, { requestKey: null });
 				authorName = (u.name as string) || (u.email as string) || '';
 			} catch { authorName = ''; }
 			const isFork = !!(r.forkedFrom as string);
 			isInstalled = (r.owner as string) !== user?.id && !isFork;
+			categoryOwnerId = r.owner as string;
 			allCards = await listFlashcardsByCategory(categoryId);
 			selectedIds = new Set();
 		} catch (e) {
@@ -83,7 +89,6 @@
 			pendingForkId = await forkCategory(categoryId, newTitle, (p) => { forkProgress = p; });
 		} catch (e) { forkError = e instanceof Error ? e.message : 'Fork failed.'; }
 	}
-
 	function handleForkDone() {
 		forkRunning = false;
 		if (pendingForkId) goto(`/viewer/flashcards/category/${pendingForkId}`);
@@ -128,6 +133,10 @@
 			</button>
 		</div>
 
+		{#if isShared}
+			<StarRating contentType="flashcard_category" contentId={categoryId} contentOwnerId={categoryOwnerId} readonly={false} showCount={true} />
+		{/if}
+
 		{#if isInstalled}
 			<div class="flex items-center justify-between gap-4 rounded-xl border border-[var(--color-surface-700)]
 			            bg-[var(--color-surface-900)] px-4 py-3">
@@ -150,18 +159,21 @@
 		<div class="flex flex-col gap-2">
 			{#each allCards as card (card.id)}
 				<FlashcardListItem flashcard={card} showCheckbox={false}
-					categoryName={categoryName}
-					onClick={(c) => (viewingCard = c)} />
+					categoryName={categoryName} onClick={(c) => (viewingCard = c)} />
 			{/each}
 		</div>
+
+		{#if isShared}
+			<div class="border-t border-[var(--color-surface-700)] pt-6">
+				<CommentSection contentType="flashcard_category" contentId={categoryId} contentOwnerId={categoryOwnerId} isSharedContent={true} />
+			</div>
+		{/if}
 
 	{:else if screen === 'select'}
 		<div class="flex items-center justify-between gap-4">
 			<h1 class="font-display text-2xl text-[var(--color-text-primary)]">Select Cards</h1>
 			<button onclick={() => { screen = 'browse'; selectedIds = new Set(); }}
-				class="shrink-0 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
-				Cancel
-			</button>
+				class="shrink-0 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">Cancel</button>
 		</div>
 		<div class="flex items-center gap-3">
 			<button onclick={selectAll} class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">Select all</button>
@@ -182,20 +194,18 @@
 		</button>
 
 	{:else if screen === 'quiz'}
-		<div style="display:flex; flex-direction:column; align-items:center; width:100%;">
-			<div class="flex items-center justify-between gap-4">
+		<div style="display:flex;flex-direction:column;align-items:center;width:100%;">
+			<div class="flex items-center justify-between gap-4 w-full">
 				<span class="text-sm text-[var(--color-text-secondary)]">Card {$quizSession.currentIndex + 1} of {$quizSession.cards.length}</span>
 				<button onclick={handleBackToDeck} class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-error-400)] transition-colors">Quit Quiz</button>
 			</div>
 			<div class="h-1.5 w-full rounded-full bg-[var(--color-surface-700)] overflow-hidden">
-				<div class="h-full rounded-full bg-[var(--color-accent-500)] transition-all duration-300" style="width: {$progress}%"></div>
+				<div class="h-full rounded-full bg-[var(--color-accent-500)] transition-all duration-300" style="width:{$progress}%"></div>
 			</div>
-			<div style="display:flex; flex-direction:column; align-items:center; width:100%; max-width:640px; gap:1rem;">
+			<div style="display:flex;flex-direction:column;align-items:center;width:100%;max-width:640px;gap:1rem;">
 				{#if $currentCard}
 					<div style="width:100%;">
-						<FlipCard frontText={$currentCard.frontText} frontImageUrl={$currentCard.frontImageUrl}
-							frontAudioUrl={$currentCard.frontAudioUrl} backText={$currentCard.backText}
-							backImageUrl={$currentCard.backImageUrl} backAudioUrl={$currentCard.backAudioUrl} />
+						<FlipCard frontText={$currentCard.frontText} frontImageUrl={$currentCard.frontImageUrl} frontAudioUrl={$currentCard.frontAudioUrl} backText={$currentCard.backText} backImageUrl={$currentCard.backImageUrl} backAudioUrl={$currentCard.backAudioUrl} />
 					</div>
 				{/if}
 				<div class="grid grid-cols-3 gap-3" style="width:100%;">
@@ -213,9 +223,9 @@
 				<p class="text-sm text-[var(--color-text-secondary)]">{$summary.total} cards studied</p>
 			</div>
 			<div class="flex h-3 w-full overflow-hidden rounded-full">
-				{#if $summary.correct > 0}<div class="bg-[var(--color-success-500)]" style="width: {($summary.correct / $summary.total) * 100}%"></div>{/if}
-				{#if $summary.partial > 0}<div class="bg-[var(--color-warning-400)]" style="width: {($summary.partial / $summary.total) * 100}%"></div>{/if}
-				{#if $summary.incorrect > 0}<div class="bg-[var(--color-error-500)]" style="width: {($summary.incorrect / $summary.total) * 100}%"></div>{/if}
+				{#if $summary.correct > 0}<div class="bg-[var(--color-success-500)]" style="width:{($summary.correct/$summary.total)*100}%"></div>{/if}
+				{#if $summary.partial > 0}<div class="bg-[var(--color-warning-400)]" style="width:{($summary.partial/$summary.total)*100}%"></div>{/if}
+				{#if $summary.incorrect > 0}<div class="bg-[var(--color-error-500)]" style="width:{($summary.incorrect/$summary.total)*100}%"></div>{/if}
 			</div>
 			<div class="grid grid-cols-3 gap-3 text-center">
 				<div class="flex flex-col gap-0.5"><span class="text-xl font-semibold text-[var(--color-success-500)]">{$summary.correct}</span><span class="text-xs text-[var(--color-text-muted)]">Correct</span></div>
@@ -223,7 +233,7 @@
 				<div class="flex flex-col gap-0.5"><span class="text-xl font-semibold text-[var(--color-error-400)]">{$summary.incorrect}</span><span class="text-xs text-[var(--color-text-muted)]">Incorrect</span></div>
 			</div>
 			<div class="flex flex-col gap-3">
-				<button onclick={handleRetry} disabled={failedCount === 0} class="w-full rounded-xl bg-[var(--color-accent-500)] py-2.5 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Retry Incorrect + Partial ({failedCount})</button>
+				<button onclick={handleRetry} disabled={failedCount===0} class="w-full rounded-xl bg-[var(--color-accent-500)] py-2.5 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">Retry Incorrect + Partial ({failedCount})</button>
 				<button onclick={handleBackToDeck} class="w-full rounded-xl border border-[var(--color-surface-600)] py-2.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">Back to Deck</button>
 			</div>
 		</div>

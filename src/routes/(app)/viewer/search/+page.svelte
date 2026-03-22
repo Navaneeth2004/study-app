@@ -1,30 +1,26 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { searchMyTextbooks, searchMyCategories } from '$lib/viewer/searchService';
+	import { searchOwn } from '$lib/search/fullTextSearchService';
 	import {
 		getSharedTextbooks, getSharedCategories,
 		installContent, uninstallContent, getMyInstalls
 	} from '$lib/sharing/sharingService';
 	import SearchTextbookCard from '$lib/viewer/components/search/SearchTextbookCard.svelte';
 	import SearchDeckCard from '$lib/viewer/components/search/SearchDeckCard.svelte';
-	import EmptyState from '$lib/shared/components/EmptyState.svelte';
+	import SearchResultGroup from '$lib/search/components/SearchResultGroup.svelte';
 	import { pb } from '$lib/shared/pocketbase';
-	import type { Textbook } from '$lib/creator/creatorTypes';
-	import type { FlashcardCategory } from '$lib/creator/flashcardTypes';
+	import type { SearchResults } from '$lib/search/searchTypes';
 	import type { SharedTextbook, SharedCategory, Install } from '$lib/sharing/sharingTypes';
 
 	type Mode = 'my' | 'universal';
 
-	// Use pb.authStore directly so it's always current at filter time
-	function getMyId(): string {
-		return (pb.authStore.record?.id as string) ?? '';
-	}
+	function getMyId(): string { return (pb.authStore.record?.id as string) ?? ''; }
 
 	let query = $state('');
 	let mode = $state<Mode>('my');
-	let myTextbooks = $state<Textbook[]>([]);
-	let myCategories = $state<FlashcardCategory[]>([]);
+	let myResults = $state<SearchResults | null>(null);
 	let sharedTextbooks = $state<SharedTextbook[]>([]);
 	let sharedCategories = $state<SharedCategory[]>([]);
 	let installs = $state<Install[]>([]);
@@ -36,6 +32,8 @@
 	onMount(async () => {
 		inputEl?.focus();
 		installs = await getMyInstalls().catch(() => []);
+		const urlQ = $page.url.searchParams.get('q');
+		if (urlQ) { query = urlQ; await runSearch(urlQ, mode); }
 	});
 
 	function getInstallId(contentId: string): string | null {
@@ -44,97 +42,60 @@
 
 	$effect(() => {
 		clearTimeout(debounceTimer);
-		const q = query;
-		const m = mode;
+		const q = query; const m = mode;
 		debounceTimer = setTimeout(() => runSearch(q, m), 300);
 	});
 
 	async function runSearch(q: string, m: Mode) {
-		if (!q.trim()) {
-			myTextbooks = [];
-			myCategories = [];
-			sharedTextbooks = [];
-			sharedCategories = [];
-			return;
-		}
-		searching = true;
-		error = '';
+		if (!q.trim()) { myResults = null; sharedTextbooks = []; sharedCategories = []; return; }
+		searching = true; error = '';
 		try {
 			if (m === 'my') {
-				[myTextbooks, myCategories] = await Promise.all([
-					searchMyTextbooks(q),
-					searchMyCategories(q)
-				]);
+				myResults = await searchOwn(q);
 			} else {
 				[sharedTextbooks, sharedCategories] = await Promise.all([
 					getSharedTextbooks(q),
 					getSharedCategories(q)
 				]);
-				// Filter out own content — user already owns it
 				sharedTextbooks = sharedTextbooks.filter((t) => t.owner !== getMyId());
 				sharedCategories = sharedCategories.filter((c) => c.owner !== getMyId());
 			}
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Search failed.';
-		} finally {
-			searching = false;
-		}
+		} catch (e) { error = e instanceof Error ? e.message : 'Search failed.'; }
+		finally { searching = false; }
 	}
 
 	async function handleInstallTextbook(item: SharedTextbook) {
-		try {
-			const install = await installContent('textbook', item.id);
-			installs = [...installs, install];
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Could not install.';
-		}
+		try { const i = await installContent('textbook', item.id); installs = [...installs, i]; }
+		catch (e) { error = e instanceof Error ? e.message : 'Could not install.'; }
 	}
-
 	async function handleUninstallTextbook(item: SharedTextbook) {
-		const installId = getInstallId(item.id);
-		if (!installId) return;
-		try {
-			await uninstallContent(installId);
-			installs = installs.filter((i) => i.id !== installId);
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Could not remove.';
-		}
+		const id = getInstallId(item.id); if (!id) return;
+		try { await uninstallContent(id); installs = installs.filter((i) => i.id !== id); }
+		catch (e) { error = e instanceof Error ? e.message : 'Could not remove.'; }
 	}
-
 	async function handleInstallCategory(item: SharedCategory) {
-		try {
-			const install = await installContent('flashcard_category', item.id);
-			installs = [...installs, install];
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Could not install.';
-		}
+		try { const i = await installContent('flashcard_category', item.id); installs = [...installs, i]; }
+		catch (e) { error = e instanceof Error ? e.message : 'Could not install.'; }
 	}
-
 	async function handleUninstallCategory(item: SharedCategory) {
-		const installId = getInstallId(item.id);
-		if (!installId) return;
-		try {
-			await uninstallContent(installId);
-			installs = installs.filter((i) => i.id !== installId);
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Could not remove.';
-		}
+		const id = getInstallId(item.id); if (!id) return;
+		try { await uninstallContent(id); installs = installs.filter((i) => i.id !== id); }
+		catch (e) { error = e instanceof Error ? e.message : 'Could not remove.'; }
 	}
 
-	const hasMyResults = $derived(myTextbooks.length > 0 || myCategories.length > 0);
-	const hasUniversalResults = $derived(sharedTextbooks.length > 0 || sharedCategories.length > 0);
+	const hasMyResults = $derived(myResults &&
+		(myResults.textbooks.length + myResults.chapters.length + myResults.blocks.length +
+		 myResults.categories.length + myResults.flashcards.length) > 0);
+	const hasUniversal = $derived(sharedTextbooks.length > 0 || sharedCategories.length > 0);
 </script>
 
-<svelte:head>
-	<title>Search — StudyApp</title>
-</svelte:head>
+<svelte:head><title>Search — StudyApp</title></svelte:head>
 
 <div class="flex flex-col gap-6 max-w-2xl">
 	<div class="flex flex-col gap-1">
 		<h1 class="font-display text-3xl text-[var(--color-text-primary)]">Search</h1>
 	</div>
 
-	<!-- Search input -->
 	<div class="relative">
 		<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 		     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
@@ -153,82 +114,46 @@
 		/>
 	</div>
 
-	<!-- Mode toggle -->
 	<div class="flex gap-1 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] p-1">
-		<button
-			onclick={() => (mode = 'my')}
+		<button onclick={() => (mode = 'my')}
 			class="flex-1 rounded-lg py-1.5 text-sm font-medium transition-colors
-			       {mode === 'my'
-				? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)]'
-				: 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}"
-		>
+			       {mode === 'my' ? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}">
 			My Content
 		</button>
-		<button
-			onclick={() => (mode = 'universal')}
+		<button onclick={() => (mode = 'universal')}
 			class="flex-1 rounded-lg py-1.5 text-sm font-medium transition-colors
-			       {mode === 'universal'
-				? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)]'
-				: 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}"
-		>
+			       {mode === 'universal' ? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}">
 			Universal Search
 		</button>
 	</div>
 
-	{#if error}
-		<p class="text-sm text-[var(--color-error-400)]">{error}</p>
-	{/if}
+	{#if error}<p class="text-sm text-[var(--color-error-400)]">{error}</p>{/if}
 
 	{#if searching}
-		<p class="text-sm text-[var(--color-text-muted)]">Searching…</p>
-
+		<div class="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+			<svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="color:var(--color-accent-400)"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+			Searching…
+		</div>
 	{:else if !query.trim()}
 		<p class="text-sm text-[var(--color-text-muted)]">
-			{mode === 'my' ? 'Search your textbooks and flashcard decks.' : 'Discover shared content from all users.'}
+			{mode === 'my' ? 'Search across all your textbooks, chapters, flashcards and more.' : 'Discover shared content from all users. Click any result to view — install to save to your library.'}
 		</p>
 
 	{:else if mode === 'my'}
 		{#if !hasMyResults}
 			<p class="text-sm text-[var(--color-text-muted)]">No content found for "{query}".</p>
-		{/if}
-
-		{#if myTextbooks.length > 0}
-			<section class="flex flex-col gap-3">
-				<h2 class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">Textbooks</h2>
-				<div class="flex flex-col gap-2">
-					{#each myTextbooks as item (item.id)}
-						<SearchTextbookCard
-							item={{ id: item.id, title: item.title, description: item.description,
-							        shareTitle: item.title, shareDescription: item.description,
-							        owner: item.owner, ownerName: '', created: item.created }}
-							installId={null}
-							universal={false}
-							onClick={() => goto(`/viewer/textbooks/${item.id}`)}
-						/>
-					{/each}
-				</div>
-			</section>
-		{/if}
-
-		{#if myCategories.length > 0}
-			<section class="flex flex-col gap-3">
-				<h2 class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">Flashcard Decks</h2>
-				<div class="flex flex-col gap-2">
-					{#each myCategories as item (item.id)}
-						<SearchDeckCard
-							{item}
-							installId={null}
-							universal={false}
-							onClick={() => goto(`/viewer/flashcards/category/${item.id}`)}
-						/>
-					{/each}
-				</div>
-			</section>
+		{:else if myResults}
+			<div class="flex flex-col gap-6">
+				<SearchResultGroup title="Textbooks" items={myResults.textbooks} />
+				<SearchResultGroup title="Chapters" items={myResults.chapters} />
+				<SearchResultGroup title="Content" items={myResults.blocks} />
+				<SearchResultGroup title="Flashcard Decks" items={myResults.categories} />
+				<SearchResultGroup title="Flashcards" items={myResults.flashcards} />
+			</div>
 		{/if}
 
 	{:else}
-		<!-- Universal search -->
-		{#if !hasUniversalResults}
+		{#if !hasUniversal}
 			<p class="text-sm text-[var(--color-text-muted)]">No shared content found for "{query}".</p>
 		{/if}
 
@@ -239,12 +164,10 @@
 					{#each sharedTextbooks as item (item.id)}
 						{@const iid = getInstallId(item.id)}
 						<SearchTextbookCard
-							{item}
-							installId={iid}
-							universal={true}
+							{item} installId={iid} universal={true}
 							onInstall={() => handleInstallTextbook(item)}
 							onUninstall={() => handleUninstallTextbook(item)}
-							onClick={iid ? () => goto(`/viewer/textbooks/${item.id}`) : undefined}
+							onClick={() => goto(`/viewer/textbooks/${item.id}`)}
 						/>
 					{/each}
 				</div>
@@ -258,12 +181,10 @@
 					{#each sharedCategories as item (item.id)}
 						{@const iid = getInstallId(item.id)}
 						<SearchDeckCard
-							{item}
-							installId={iid}
-							universal={true}
+							{item} installId={iid} universal={true}
 							onInstall={() => handleInstallCategory(item)}
 							onUninstall={() => handleUninstallCategory(item)}
-							onClick={iid ? () => goto(`/viewer/flashcards/category/${item.id}`) : undefined}
+							onClick={() => goto(`/viewer/flashcards/category/${item.id}`)}
 						/>
 					{/each}
 				</div>

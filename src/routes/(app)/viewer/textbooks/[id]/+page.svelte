@@ -8,6 +8,8 @@
 	import ChapterList from '$lib/viewer/components/ChapterList.svelte';
 	import EmptyState from '$lib/shared/components/EmptyState.svelte';
 	import BookmarkButton from '$lib/shared/components/BookmarkButton.svelte';
+	import StarRating from '$lib/shared/components/StarRating.svelte';
+	import CommentSection from '$lib/social/components/CommentSection.svelte';
 	import ForkModal from '$lib/shared/components/ForkModal.svelte';
 	import ForkProgressModal from '$lib/shared/components/ForkProgressModal.svelte';
 	import { forkTextbook } from '$lib/sharing/forkService';
@@ -23,6 +25,7 @@
 	let error = $state('');
 	let authorName = $state('');
 	let isInstalled = $state(false);
+	let isShared = $state(false);
 
 	let showForkModal = $state(false);
 	let forkRunning = $state(false);
@@ -39,6 +42,7 @@
 				description: (r.description as string) ?? '',
 				owner: r.owner as string, created: r.created as string, updated: r.updated as string
 			};
+			isShared = !!(r.isShared as boolean);
 			try {
 				const u = await pb.collection('users').getOne(r.owner as string, { requestKey: null });
 				authorName = (u.name as string) || (u.email as string) || '';
@@ -59,7 +63,6 @@
 			pendingForkId = await forkTextbook(textbookId, newTitle, (p) => { forkProgress = p; });
 		} catch (e) { forkError = e instanceof Error ? e.message : 'Fork failed.'; }
 	}
-
 	function handleForkDone() {
 		forkRunning = false;
 		if (pendingForkId) goto(`/viewer/textbooks/${pendingForkId}`);
@@ -93,14 +96,13 @@
 		<div class="flex flex-col gap-2">
 			<div class="flex items-center gap-2">
 				<h1 class="font-display text-3xl text-[var(--color-text-primary)] flex-1">{textbook.title}</h1>
-				<BookmarkButton
-					contentType="textbook"
-					contentId={textbook.id}
-					contentTitle={textbook.title}
-				/>
+				<BookmarkButton contentType="textbook" contentId={textbook.id} contentTitle={textbook.title} />
 			</div>
 			{#if textbook.description}
 				<p class="text-[var(--color-text-secondary)]">{textbook.description}</p>
+			{/if}
+			{#if isShared}
+				<StarRating contentType="textbook" contentId={textbook.id} contentOwnerId={textbook.owner} readonly={false} showCount={true} />
 			{/if}
 		</div>
 
@@ -133,5 +135,12 @@
 				<ChapterList {chapters} textbookId={textbookId} />
 			{/if}
 		</section>
+
+		<!-- Comments — only for shared content -->
+		{#if isShared}
+			<div class="border-t border-[var(--color-surface-700)] pt-6">
+				<CommentSection contentType="textbook" contentId={textbookId} contentOwnerId={textbook?.owner ?? ''} isSharedContent={true} />
+			</div>
+		{/if}
 	{/if}
 </div>
