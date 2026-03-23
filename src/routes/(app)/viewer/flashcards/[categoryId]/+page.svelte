@@ -31,6 +31,9 @@
 	let categoryName = $state('');
 	let authorName = $state('');
 	let isInstalled = $state(false);
+	let isOwnContent = $state(true);
+	let installId = $state<string | null>(null);
+	let installing = $state(false);
 	let categoryOwnerId = $state('');
 	let isShared = $state(false);
 	let allCards = $state<Flashcard[]>([]);
@@ -60,15 +63,14 @@
 				authorName = (u.name as string) || (u.email as string) || '';
 			} catch { authorName = ''; }
 			const isFork = !!(r.forkedFrom as string);
-			const isNotMine = (r.owner as string) !== user?.id && !isFork;
-			if (isNotMine && user?.id) {
-				const installs = await pb.collection('installs').getFullList({
-					requestKey: null,
-					filter: `user = "${user.id}" && contentId = "${categoryId}" && contentType = "flashcard_category"`
-				});
-				isInstalled = installs.length > 0;
-			} else {
-				isInstalled = false;
+			isOwnContent = (r.owner as string) === user?.id || isFork;
+			if (!authorName && (r.owner as string) === user?.id) {
+				authorName = (user?.name as string) || (user?.email as string) || '';
+			}
+			if (!isOwnContent && user?.id) {
+				const iid = await checkInstalled(categoryId);
+				installId = iid;
+				isInstalled = !!iid;
 			}
 			categoryOwnerId = r.owner as string;
 			allCards = await listFlashcardsByCategory(categoryId);
@@ -89,6 +91,19 @@
 	function handleRate(rating: Rating) { rateCard(rating); if ($isComplete) screen = 'results'; }
 	function handleRetry() { restartWithFailed(); screen = 'quiz'; }
 	function handleBackToDeck() { resetQuiz(); screen = 'browse'; }
+
+	async function handleInstall() {
+		installing = true;
+		try { const i = await installContent('flashcard_category', categoryId); installId = i.id; isInstalled = true; }
+		catch (e) { error = e instanceof Error ? e.message : 'Could not install.'; }
+		finally { installing = false; }
+	}
+	async function handleUninstall() {
+		if (!installId) return; installing = true;
+		try { await uninstallContent(installId); installId = null; isInstalled = false; }
+		catch (e) { error = e instanceof Error ? e.message : 'Could not remove.'; }
+		finally { installing = false; }
+	}
 
 	async function handleForkConfirm(newTitle: string) {
 		showForkModal = false; forkRunning = true;
@@ -130,38 +145,59 @@
 		<EmptyState heading="No flashcards yet" description="This category has no flashcards yet." />
 
 	{:else if screen === 'browse'}
-		<div class="flex items-center justify-between gap-4">
-			<div class="flex items-center gap-2 flex-1 min-w-0">
-				<h1 class="font-display text-2xl text-[var(--color-text-primary)] truncate">{categoryName}</h1>
-				<BookmarkButton contentType="flashcard_category" contentId={categoryId} contentTitle={categoryName} />
+		<div class="flex flex-col gap-1">
+			<div class="flex items-center justify-between gap-4">
+				<div class="flex items-center gap-2 flex-1 min-w-0">
+					<h1 class="font-display text-2xl text-[var(--color-text-primary)] truncate">{categoryName}</h1>
+					<BookmarkButton contentType="flashcard_category" contentId={categoryId} contentTitle={categoryName} />
+				</div>
+				<button onclick={() => (screen = 'select')}
+					class="shrink-0 rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm font-medium
+					       text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)] transition-colors">
+					Start Test
+				</button>
 			</div>
-			<button onclick={() => (screen = 'select')}
-				class="shrink-0 rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm font-medium
-				       text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)] transition-colors">
-				Start Test
-			</button>
+			{#if authorName}<p class="text-sm text-[var(--color-text-muted)]">by {authorName}</p>{/if}
 		</div>
 
 		{#if isShared}
 			<StarRating contentType="flashcard_category" contentId={categoryId} contentOwnerId={categoryOwnerId} readonly={false} showCount={true} />
 		{/if}
 
-		{#if isInstalled}
+		{#if !isOwnContent}
 			<div class="flex items-center justify-between gap-4 rounded-xl border border-[var(--color-surface-700)]
 			            bg-[var(--color-surface-900)] px-4 py-3">
 				<div class="flex flex-col gap-0.5">
-					<p class="text-sm font-medium text-[var(--color-text-secondary)]">Installed content — read only</p>
-					<p class="text-xs text-[var(--color-text-muted)]">Duplicate to make edits, share or export.</p>
+					{#if isInstalled}
+						<p class="text-sm font-medium text-[var(--color-text-secondary)]">Installed — duplicate to edit or export</p>
+					{:else}
+						<p class="text-sm font-medium text-[var(--color-text-secondary)]">Add this to your library</p>
+					{/if}
 				</div>
-				<button onclick={() => (showForkModal = true)}
-					class="flex shrink-0 items-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-2
-					       text-sm font-medium text-white hover:bg-[var(--color-accent-400)] transition-colors">
-					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<circle cx="12" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/>
-						<path d="M12 7v4M6 17v-2a4 4 0 014-4h4a4 4 0 014 4v2"/>
-					</svg>
-					Duplicate
-				</button>
+				<div class="flex shrink-0 items-center gap-2">
+					{#if isInstalled}
+						<button onclick={() => (showForkModal = true)}
+							class="flex items-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-2
+							       text-sm font-medium text-white hover:bg-[var(--color-accent-400)] transition-colors">
+							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<circle cx="12" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/>
+								<path d="M12 7v4M6 17v-2a4 4 0 014-4h4a4 4 0 014 4v2"/>
+							</svg>
+							Duplicate
+						</button>
+						<button onclick={handleUninstall} disabled={installing}
+							class="rounded-xl border border-[var(--color-surface-600)] px-4 py-2 text-sm
+							       text-[var(--color-text-secondary)] hover:text-[var(--color-error-400)]
+							       disabled:opacity-50 transition-colors">{installing ? '…' : 'Remove'}</button>
+					{:else}
+						<button onclick={handleInstall} disabled={installing}
+							class="flex items-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-2
+							       text-sm font-medium text-white hover:bg-[var(--color-accent-400)]
+							       disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+							{installing ? 'Installing…' : 'Get'}
+						</button>
+					{/if}
+				</div>
 			</div>
 		{/if}
 

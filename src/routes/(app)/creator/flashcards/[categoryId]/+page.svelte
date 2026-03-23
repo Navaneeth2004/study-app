@@ -119,7 +119,7 @@
 	/>
 {/if}
 
-<div class="flex flex-col gap-6 max-w-2xl">
+<div class="flex flex-col gap-6">
 	<nav class="flex items-center gap-2 text-sm">
 		<a href="/creator" class="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">Creator</a>
 		<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" class="text-[var(--color-text-muted)]"><polyline points="9 18 15 12 9 6"/></svg>
@@ -177,7 +177,7 @@
 			description="Create your first flashcard in this category."
 		/>
 	{:else}
-		<div role="list" class="flex flex-col gap-2">
+		<div role="list" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 			{#each flashcards as card (card.id)}
 				<FlashcardCard
 					flashcard={card}

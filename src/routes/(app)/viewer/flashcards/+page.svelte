@@ -13,23 +13,15 @@
 	}
 
 	const user = getCurrentUser();
-	const uid = user?.id ?? '';
 
 	let decks = $state<DeckItem[]>([]);
 	let loading = $state(true);
 	let error = $state('');
 
-	async function getUserName(userId: string): Promise<string> {
-		if (!userId) return '';
-		try {
-			const r = await pb.collection('users').getOne(userId, { requestKey: null });
-			return (r.name as string) || (r.email as string) || '';
-		} catch { return ''; }
-	}
-
 	onMount(async () => {
 		loading = true;
 		try {
+			const uid = user?.id ?? '';
 			const own = await pb.collection('flashcard_categories').getFullList({
 				requestKey: null, filter: `owner = "${uid}"`, sort: 'name'
 			});
@@ -37,48 +29,41 @@
 				requestKey: null, filter: `user = "${uid}" && contentType = "flashcard_category"`
 			});
 			const installedIds = installs.map((i) => i.contentId as string);
-			const installedRaw = installedIds.length > 0
+			const installedRecords = installedIds.length > 0
 				? await Promise.all(installedIds.map((id) =>
-					pb.collection('flashcard_categories').getOne(id, { requestKey: null }).catch(() => null)
+					pb.collection('flashcard_categories').getOne(id, { requestKey: null, expand: 'owner' }).catch(() => null)
 				))
 				: [];
-			const ownSet = new Set(own.map((r) => r.id as string));
 
-			const items: DeckItem[] = await Promise.all([
-				...own.map(async (r) => {
+			const ownSet = new Set(own.map((r) => r.id as string));
+			const allRecords = [
+				...own.map((r) => ({ r, isOwn: true, ownerName: user?.name || user?.email || '' })),
+				...installedRecords
+					.filter((r): r is NonNullable<typeof r> => r !== null && !ownSet.has(r.id as string))
+					.map((r) => ({
+						r, isOwn: false,
+						ownerName: (r.expand?.owner as Record<string, unknown>)?.name as string ?? ''
+					}))
+			];
+
+			const items: DeckItem[] = await Promise.all(
+				allRecords.map(async ({ r, isOwn, ownerName }) => {
 					const cards = await pb.collection('flashcards').getFullList({
 						requestKey: null, filter: `category = "${r.id}"`, fields: 'id'
 					});
 					return {
-						id: r.id as string, name: r.name as string,
+						id: r.id as string,
+						name: r.name as string,
 						description: (r.description as string) ?? '',
 						cardCount: cards.length,
 						href: `/viewer/flashcards/category/${r.id}`,
-						isOwn: true, authorName: '',
+						isOwn,
+						authorName: ownerName,
 						isFork: !!(r.forkedFrom as string),
 						forkedFromAuthor: (r.forkedFromAuthor as string) ?? ''
 					};
-				}),
-				...installedRaw
-					.filter((r): r is NonNullable<typeof r> => r !== null && !ownSet.has(r.id as string))
-					.map(async (r) => {
-						const [cards, ownerName] = await Promise.all([
-							pb.collection('flashcards').getFullList({
-								requestKey: null, filter: `category = "${r.id}"`, fields: 'id'
-							}),
-							getUserName(r.owner as string)
-						]);
-						return {
-							id: r.id as string, name: r.name as string,
-							description: (r.description as string) ?? '',
-							cardCount: cards.length,
-							href: `/viewer/flashcards/category/${r.id}`,
-							isOwn: false, authorName: ownerName,
-							isFork: !!(r.forkedFrom as string),
-							forkedFromAuthor: (r.forkedFromAuthor as string) ?? ''
-						};
-					})
-			]);
+				})
+			);
 			decks = items;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load decks.';
@@ -93,12 +78,15 @@
 </svelte:head>
 
 <div class="flex flex-col gap-6">
+
 	<div class="flex flex-col gap-1">
 		<h1 class="font-display text-3xl text-[var(--color-text-primary)]">Flashcard Decks</h1>
 		<p class="text-[var(--color-text-secondary)]">Your solo flashcard categories.</p>
 	</div>
 
-	{#if error}<p class="text-sm text-[var(--color-error-400)]">{error}</p>{/if}
+	{#if error}
+		<p class="text-sm text-[var(--color-error-400)]">{error}</p>
+	{/if}
 
 	{#if loading}
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

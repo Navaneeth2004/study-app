@@ -3,7 +3,7 @@ import type { Handle } from '@sveltejs/kit';
 import PocketBase from 'pocketbase';
 import { PUBLIC_POCKETBASE_URL } from '$env/static/public';
 
-const PROTECTED_PREFIXES = ['/viewer', '/settings', '/creator'];
+const PROTECTED_PREFIXES = ['/viewer', '/settings', '/creator', '/profile', '/notifications'];
 const AUTH_PREFIX = '/auth';
 
 export const handle: Handle = async ({ event, resolve }) => {

@@ -2,10 +2,13 @@
 	import CommentInput from './CommentInput.svelte';
 	import type { Comment } from '$lib/social/socialTypes';
 	import { pb } from '$lib/shared/pocketbase';
+	import { likeComment, unlikeComment, isLiked, getLikeCount } from '$lib/social/commentLikeService';
+	import { onMount } from 'svelte';
 
 	interface Props {
 		comment: Comment;
 		contentOwnerId?: string;
+		contentTitle?: string;
 		depth?: number;
 		onReply: (parentId: string, text: string) => Promise<void>;
 		onEdit: (id: string, text: string) => Promise<void>;
@@ -13,12 +16,14 @@
 		onVote: (id: string, vote: 1 | -1) => Promise<void>;
 	}
 
-	let { comment, contentOwnerId = '', depth = 0, onReply, onEdit, onDelete, onVote }: Props = $props();
+	let { comment, contentOwnerId = '', contentTitle = '', depth = 0, onReply, onEdit, onDelete, onVote }: Props = $props();
 
 	const currentUserId = pb.authStore.record?.id ?? '';
 	const isOwner = $derived(comment.user === currentUserId);
 	const isContentAuthor = $derived(!!contentOwnerId && comment.user === contentOwnerId);
 	const displayName = $derived(comment.expand?.user?.name || comment.expand?.user?.email || 'Anonymous');
+	const commentUserId = $derived(comment.expand?.user?.id || comment.user);
+	const isOwnComment = $derived(commentUserId === currentUserId);
 
 	let showReply = $state(false);
 	let showReplies = $state(false);
@@ -27,6 +32,38 @@
 	let confirmDelete = $state(false);
 	let votingUp = $state(false);
 	let votingDown = $state(false);
+
+	// Like state
+	let likeId = $state<string | null>(null);
+	let likeCount = $state(0);
+	let liking = $state(false);
+
+	onMount(async () => {
+		const [id, count] = await Promise.all([
+			isLiked(comment.id),
+			getLikeCount(comment.id)
+		]);
+		likeId = id;
+		likeCount = count;
+	});
+
+	async function handleLike() {
+		if (liking) return;
+		liking = true;
+		try {
+			if (likeId) {
+				await unlikeComment(likeId);
+				likeId = null;
+				likeCount = Math.max(0, likeCount - 1);
+			} else {
+				const result = await likeComment(comment.id, comment.user, contentTitle);
+				likeId = result.likeId;
+				likeCount = result.likeCount;
+			}
+		} catch { /* silent */ } finally {
+			liking = false;
+		}
+	}
 
 	function formatDate(iso: string): string {
 		const d = new Date(iso);
@@ -41,7 +78,15 @@
 	            bg-[var(--color-surface-900)] px-4 py-3">
 		<!-- Header -->
 		<div class="flex items-center gap-2 flex-wrap">
-			<span class="text-sm font-medium text-[var(--color-text-primary)]">{displayName}</span>
+			<!-- Commenter name — links to profile unless own -->
+			{#if isOwnComment}
+				<span class="text-sm font-medium text-[var(--color-text-primary)]">{displayName}</span>
+			{:else}
+				<a href="/profile/{commentUserId}"
+				   class="text-sm font-medium text-[var(--color-text-primary)] hover:text-[var(--color-accent-400)] transition-colors">
+					{displayName}
+				</a>
+			{/if}
 			{#if isContentAuthor}
 				<span class="rounded-full px-2 py-0.5 text-xs font-medium"
 				      style="background: color-mix(in srgb, var(--color-accent-500) 15%, transparent); color: var(--color-accent-400);">
@@ -58,86 +103,94 @@
 		{#if comment.isDeleted}
 			<p class="text-sm italic text-[var(--color-text-muted)]">This comment was deleted.</p>
 		{:else if editing}
-			<textarea
-				bind:value={editText}
-				rows={3}
-				class="w-full resize-none rounded-xl border border-[var(--color-surface-700)]
-				       bg-[var(--color-surface-800)] px-3 py-2 text-sm text-[var(--color-text-primary)]
-				       placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-500)]
-				       focus:outline-none transition-colors"
-			></textarea>
-			<div class="flex gap-2">
-				<button
-					onclick={async () => { await onEdit(comment.id, editText); editing = false; }}
-					disabled={!editText.trim()}
-					class="rounded-lg bg-[var(--color-accent-500)] px-3 py-1 text-xs font-medium
-					       text-white hover:bg-[var(--color-accent-400)] disabled:opacity-50 transition-colors">
-					Save
-				</button>
-				<button onclick={() => { editing = false; editText = comment.text; }}
-					class="rounded-lg border border-[var(--color-surface-600)] px-3 py-1 text-xs
-					       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">
-					Cancel
-				</button>
+			<div class="flex flex-col gap-2">
+				<textarea
+					bind:value={editText}
+					rows={3}
+					class="w-full resize-none rounded-lg border border-[var(--color-surface-600)]
+					       bg-[var(--color-surface-800)] px-3 py-2 text-sm text-[var(--color-text-primary)]
+					       placeholder:text-[var(--color-text-muted)] focus:outline-none
+					       focus:border-[var(--color-accent-500)] transition-colors"
+				></textarea>
+				<div class="flex gap-2">
+					<button onclick={async () => { await onEdit(comment.id, editText); editing = false; }}
+						class="rounded-lg bg-[var(--color-accent-500)] px-3 py-1.5 text-xs font-medium
+						       text-white hover:bg-[var(--color-accent-400)] transition-colors">Save</button>
+					<button onclick={() => (editing = false)}
+						class="rounded-lg border border-[var(--color-surface-600)] px-3 py-1.5 text-xs
+						       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">Cancel</button>
+				</div>
 			</div>
 		{:else}
 			<p class="text-sm text-[var(--color-text-primary)] leading-relaxed whitespace-pre-wrap">{comment.text}</p>
 		{/if}
 
 		<!-- Actions row -->
-		{#if !comment.isDeleted}
-			<div class="flex items-center gap-3 pt-0.5 flex-wrap">
-				<!-- Vote buttons -->
-				<div class="flex items-center gap-1">
-					<button
-						onclick={async () => { votingUp = true; try { await onVote(comment.id, 1); } finally { votingUp = false; } }}
-						disabled={votingUp}
-						class="flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs transition-colors
-						       {comment.userVote === 1
-							? 'bg-[var(--color-success-500)]/15 text-[var(--color-success-500)]'
-							: 'text-[var(--color-text-muted)] hover:text-[var(--color-success-500)] hover:bg-[var(--color-surface-800)]'}"
-						aria-label="Upvote"
-					>
-						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-							<polyline points="18 15 12 9 6 15"/>
-						</svg>
-						{comment.upvotes}
-					</button>
-					<button
-						onclick={async () => { votingDown = true; try { await onVote(comment.id, -1); } finally { votingDown = false; } }}
-						disabled={votingDown}
-						class="flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs transition-colors
-						       {comment.userVote === -1
-							? 'bg-[var(--color-error-500)]/15 text-[var(--color-error-400)]'
-							: 'text-[var(--color-text-muted)] hover:text-[var(--color-error-400)] hover:bg-[var(--color-surface-800)]'}"
-						aria-label="Downvote"
-					>
-						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-							<polyline points="6 9 12 15 18 9"/>
-						</svg>
-						{comment.downvotes}
-					</button>
-					{#if netVotes !== 0}
-						<span class="text-xs {netVotes > 0 ? 'text-[var(--color-success-500)]' : 'text-[var(--color-error-400)]'}">
-							{netVotes > 0 ? '+' : ''}{netVotes}
-						</span>
-					{/if}
-				</div>
+		{#if !comment.isDeleted && !editing}
+			<div class="flex items-center gap-2 flex-wrap">
+				<!-- Upvote / Downvote -->
+				<button
+					onclick={async () => { votingUp = true; try { await onVote(comment.id, 1); } finally { votingUp = false; } }}
+					disabled={votingUp}
+					class="flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs transition-colors
+					       {comment.userVote === 1
+						? 'bg-[var(--color-success-500)]/15 text-[var(--color-success-500)]'
+						: 'text-[var(--color-text-muted)] hover:text-[var(--color-success-500)] hover:bg-[var(--color-surface-800)]'}"
+					aria-label="Upvote"
+				>
+					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+						<polyline points="18 15 12 9 6 15"/>
+					</svg>
+					{comment.upvotes}
+				</button>
+				<button
+					onclick={async () => { votingDown = true; try { await onVote(comment.id, -1); } finally { votingDown = false; } }}
+					disabled={votingDown}
+					class="flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs transition-colors
+					       {comment.userVote === -1
+						? 'bg-[var(--color-error-500)]/15 text-[var(--color-error-400)]'
+						: 'text-[var(--color-text-muted)] hover:text-[var(--color-error-400)] hover:bg-[var(--color-surface-800)]'}"
+					aria-label="Downvote"
+				>
+					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+						<polyline points="6 9 12 15 18 9"/>
+					</svg>
+					{comment.downvotes}
+				</button>
+				{#if netVotes !== 0}
+					<span class="text-xs {netVotes > 0 ? 'text-[var(--color-success-500)]' : 'text-[var(--color-error-400)]'}">
+						{netVotes > 0 ? '+' : ''}{netVotes}
+					</span>
+				{/if}
+
+				<!-- Heart / Like button -->
+				<button
+					onclick={handleLike}
+					disabled={liking}
+					class="flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs transition-colors
+					       {likeId
+						? 'text-[var(--color-error-400)]'
+						: 'text-[var(--color-text-muted)] hover:text-[var(--color-error-400)] hover:bg-[var(--color-surface-800)]'}"
+					aria-label={likeId ? 'Unlike' : 'Like'}
+				>
+					<svg width="12" height="12" viewBox="0 0 24 24"
+					     fill={likeId ? 'currentColor' : 'none'}
+					     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
+					</svg>
+					{#if likeCount > 0}{likeCount}{/if}
+				</button>
 
 				{#if depth === 0}
-					<button
-						onclick={() => (showReply = !showReply)}
-						class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
-					>
+					<button onclick={() => (showReply = !showReply)}
+						class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
 						Reply
 					</button>
 				{/if}
 
 				{#if (comment.replies?.length ?? 0) > 0 && depth === 0}
-					<button
-						onclick={() => (showReplies = !showReplies)}
-						class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
-					>
+					<button onclick={() => (showReplies = !showReplies)}
+						class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
 						{showReplies ? 'Hide' : 'Show'} {comment.replies!.length} {comment.replies!.length === 1 ? 'reply' : 'replies'}
 					</button>
 				{/if}
@@ -181,6 +234,7 @@
 			<svelte:self
 				comment={reply}
 				{contentOwnerId}
+				{contentTitle}
 				depth={1}
 				{onReply}
 				{onEdit}

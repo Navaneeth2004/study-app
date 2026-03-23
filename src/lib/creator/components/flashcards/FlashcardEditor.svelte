@@ -2,6 +2,10 @@
 	import { onMount } from 'svelte';
 	import type { Flashcard, FlashcardForm } from '$lib/creator/flashcardTypes';
 	import FlipCard from '$lib/shared/components/FlipCard.svelte';
+	import OCRModal from '$lib/shared/components/OCRModal.svelte';
+
+	// OCR state
+	let ocrTarget = $state<'front' | 'back' | null>(null);
 
 	interface Props {
 		flashcard: Flashcard | null;
@@ -72,6 +76,13 @@
 		}
 	}
 
+	function handleOCRInsert(text: string) {
+		if (ocrTarget === 'front') { frontText = text; }
+		else if (ocrTarget === 'back') { backText = text; }
+		isDirty = true;
+		ocrTarget = null;
+	}
+
 	function handleFrontImage(e: Event) {
 		const file = (e.target as HTMLInputElement).files?.[0];
 		if (!file) return;
@@ -128,6 +139,14 @@
 			backAudioUrl={backAudioPreview}
 		/>
 	{:else}
+		<!-- OCR Modal -->
+		<OCRModal
+			isOpen={ocrTarget !== null}
+			existingText={ocrTarget === 'front' ? frontText : backText}
+			onInsert={handleOCRInsert}
+			onClose={() => (ocrTarget = null)}
+		/>
+
 		<div class="grid gap-4 sm:grid-cols-2">
 			<!-- Front panel -->
 			<div class="flex flex-col gap-3 rounded-xl border border-[var(--color-surface-700)]
@@ -137,6 +156,18 @@
 				<textarea bind:value={frontText} placeholder="Front side text…" rows={3}
 					class="w-full resize-none bg-transparent text-sm text-[var(--color-text-primary)]
 					       placeholder:text-[var(--color-text-muted)] focus:outline-none"></textarea>
+				<!-- OCR scan button -->
+				<button type="button" onclick={() => (ocrTarget = 'front')}
+					class="self-start flex items-center gap-1 text-xs text-[var(--color-text-muted)]
+					       hover:text-[var(--color-accent-400)] transition-colors"
+					aria-label="Extract text from image (front)">
+					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+					     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
+						<circle cx="12" cy="13" r="4"/>
+					</svg>
+					Scan
+				</button>
 
 				<!-- Front image -->
 				{#if frontImagePreview}
@@ -188,6 +219,18 @@
 				<textarea bind:value={backText} placeholder="Back side text…" rows={3}
 					class="w-full resize-none bg-transparent text-sm text-[var(--color-text-primary)]
 					       placeholder:text-[var(--color-text-muted)] focus:outline-none"></textarea>
+				<!-- OCR scan button -->
+				<button type="button" onclick={() => (ocrTarget = 'back')}
+					class="self-start flex items-center gap-1 text-xs text-[var(--color-text-muted)]
+					       hover:text-[var(--color-accent-400)] transition-colors"
+					aria-label="Extract text from image (back)">
+					<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+					     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
+						<circle cx="12" cy="13" r="4"/>
+					</svg>
+					Scan
+				</button>
 
 				<!-- Back image -->
 				{#if backImagePreview}

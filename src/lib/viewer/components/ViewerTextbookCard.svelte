@@ -6,6 +6,7 @@
 		chapterCount?: number;
 		isOwn?: boolean;
 		authorName?: string;
+		ownerId?: string;
 		isFork?: boolean;
 		forkedFromAuthor?: string;
 		onClick: () => void;
@@ -31,9 +32,22 @@
 					{textbook.description}
 				</p>
 			{/if}
+
+			<!-- Always show author name if available -->
+			{#if authorName}
+				{#if !isOwn && ownerId}
+					<a href="/profile/{ownerId}" onclick={(e) => e.stopPropagation()}
+					   class="text-xs text-[var(--color-text-muted)] mt-0.5 hover:text-[var(--color-accent-400)] transition-colors">
+						by {authorName}
+					</a>
+				{:else}
+					<p class="text-xs text-[var(--color-text-muted)] mt-0.5">by {authorName}</p>
+				{/if}
+			{/if}
+
+			<!-- Fork info -->
 			{#if isFork && forkedFromAuthor}
-				<!-- Forked — you own it but it came from someone else -->
-				<div class="flex items-center gap-1.5 mt-1">
+				<div class="flex items-center gap-1 mt-0.5">
 					<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 					     stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 					     class="shrink-0 text-[var(--color-text-muted)]">
@@ -42,12 +56,11 @@
 					</svg>
 					<span class="text-xs text-[var(--color-text-muted)]">Forked from {forkedFromAuthor}</span>
 				</div>
-			{:else if !isOwn}
-				<!-- Installed — not owned by you -->
-				<div class="flex items-center gap-1.5 mt-1">
-					{#if authorName}
-						<span class="text-xs text-[var(--color-text-muted)]">by {authorName}</span>
-					{/if}
+			{/if}
+
+			<!-- Installed badge for non-own, non-fork content -->
+			{#if !isOwn && !isFork}
+				<div class="mt-0.5">
 					<span class="rounded px-1.5 py-0.5 text-xs font-medium"
 					      style="background: color-mix(in srgb, var(--color-accent-500) 15%, transparent); color: var(--color-accent-400);">
 						Installed
@@ -55,6 +68,8 @@
 				</div>
 			{/if}
 		</div>
+
+		<!-- Book icon -->
 		<div class="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg"
 		     style="background: color-mix(in srgb, var(--color-accent-500) 15%, transparent);">
 			<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -65,6 +80,7 @@
 			</svg>
 		</div>
 	</div>
+
 	{#if chapterCount !== undefined}
 		<span class="text-xs text-[var(--color-text-muted)] mt-auto">
 			{chapterCount} {chapterCount === 1 ? 'chapter' : 'chapters'}

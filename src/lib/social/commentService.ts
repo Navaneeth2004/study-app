@@ -1,4 +1,5 @@
 import { pb } from '$lib/shared/pocketbase';
+import { triggerCommentNotification, triggerReplyNotification } from '$lib/notifications/inAppNotificationService';
 import { ClientResponseError } from 'pocketbase';
 import type { Comment, CommentVote } from './socialTypes';
 
@@ -110,7 +111,28 @@ export async function createComment(
 			parentId: parentId || '',
 			isDeleted: false
 		}, { expand: 'user', requestKey: null });
-		return toComment(r);
+		const comment = toComment(r);
+		// Trigger notification (fire-and-forget)
+		try {
+			const commenterName = r.expand?.user?.name || r.expand?.user?.email || 'Someone';
+			// Get content owner ID
+			const collection = contentType === 'textbook' ? 'textbooks' : 'flashcard_categories';
+			const content = await pb.collection(collection).getOne(contentId, { requestKey: null, fields: 'owner,title,name,shareTitle' });
+			const ownerId = content.owner as string;
+			const title = (content.shareTitle as string) || (content.title as string) || (content.name as string) || '';
+			if (ownerId && ownerId !== pb.authStore.record?.id) {
+				if (parentId) {
+					// It's a reply — notify the parent comment owner
+					const parent = await pb.collection('content_comments').getOne(parentId, { requestKey: null, fields: 'user' });
+					if ((parent.user as string) !== pb.authStore.record?.id) {
+						triggerReplyNotification(parent.user as string, commenterName, title);
+					}
+				} else {
+					triggerCommentNotification(ownerId, commenterName, title, contentType, contentId);
+				}
+			}
+		} catch { /* notification errors never block */ }
+		return comment;
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
 		throw e;

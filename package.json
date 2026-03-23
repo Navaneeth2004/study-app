@@ -16,14 +16,15 @@
 		"@sveltejs/vite-plugin-svelte": "^5.0.0",
 		"@tailwindcss/vite": "^4.0.0",
 		"autoprefixer": "^10.4.20",
+		"fflate": "^0.8.2",
 		"svelte": "^5.0.0",
 		"svelte-check": "^4.0.0",
 		"tailwindcss": "^4.0.0",
 		"typescript": "^5.0.0",
-		"fflate": "^0.8.2",
 		"vite": "^6.0.0"
 	},
 	"dependencies": {
-		"pocketbase": "^0.26.8"
+		"pocketbase": "^0.26.8",
+		"tesseract.js": "^7.0.0"
 	}
 }

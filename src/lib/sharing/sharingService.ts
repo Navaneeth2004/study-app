@@ -1,4 +1,6 @@
 import { pb } from '$lib/shared/pocketbase';
+import { triggerNewContentNotification, triggerInstallMilestone } from '$lib/notifications/inAppNotificationService';
+import { getFollowers } from '$lib/profile/profileService';
 import { ClientResponseError } from 'pocketbase';
 import type { SharedTextbook, SharedCategory, Install } from './sharingTypes';
 
@@ -11,6 +13,16 @@ export async function shareTextbook(id: string, title: string, description: stri
 			shareTitle: title,
 			shareDescription: description
 		});
+		// Notify followers (fire-and-forget)
+		const me = pb.authStore.record;
+		if (me) {
+			getFollowers(me.id as string).then((followers) => {
+				const creatorName = (me.name as string) || (me.email as string) || 'Someone';
+				for (const f of followers) {
+					triggerNewContentNotification(f.id, creatorName, title, 'textbook', id);
+				}
+			}).catch(() => {});
+		}
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
 		throw e;
@@ -33,6 +45,15 @@ export async function shareCategory(id: string, title: string, description: stri
 			shareTitle: title,
 			shareDescription: description
 		});
+		const me = pb.authStore.record;
+		if (me) {
+			getFollowers(me.id as string).then((followers) => {
+				const creatorName = (me.name as string) || (me.email as string) || 'Someone';
+				for (const f of followers) {
+					triggerNewContentNotification(f.id, creatorName, title, 'flashcard_category', id);
+				}
+			}).catch(() => {});
+		}
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
 		throw e;
@@ -117,6 +138,17 @@ export async function installContent(
 			contentType,
 			contentId
 		});
+		// Trigger install milestone for content owner (fire-and-forget)
+		try {
+			const collection = contentType === 'textbook' ? 'textbooks' : 'flashcard_categories';
+			const content = await pb.collection(collection).getOne(contentId, { requestKey: null, fields: 'owner,title,name,shareTitle' });
+			const ownerId = content.owner as string;
+			const title = (content.shareTitle as string) || (content.title as string) || (content.name as string) || '';
+			const countRes = await pb.collection('installs').getList(1, 1, {
+				requestKey: null, filter: `contentId = "${contentId}"`, fields: 'id'
+			});
+			triggerInstallMilestone(ownerId, countRes.totalItems, title);
+		} catch { /* never block install */ }
 		return {
 			id: r.id as string,
 			user: r.user as string,
@@ -211,6 +243,32 @@ export async function getCategorySharingStates(): Promise<OwnerSharingState[]> {
 			shareTitle: (r.shareTitle as string) ?? '',
 			shareDescription: (r.shareDescription as string) ?? ''
 		}));
+	} catch (e) {
+		if (e instanceof ClientResponseError) throw new Error(e.message);
+		throw e;
+	}
+}
+
+// ── Install counts ────────────────────────────────────────────────────────────
+
+/** Returns a map of contentId → install count for all owned shared items */
+export async function getInstallCounts(
+	contentIds: string[]
+): Promise<Record<string, number>> {
+	if (contentIds.length === 0) return {};
+	try {
+		const filter = '(' + contentIds.map((id) => `contentId = "${id}"`).join(' || ') + ')';
+		const records = await pb.collection('installs').getFullList({
+			requestKey: null,
+			filter
+		});
+		const counts: Record<string, number> = {};
+		for (const id of contentIds) counts[id] = 0;
+		for (const r of records) {
+			const id = r.contentId as string;
+			if (id in counts) counts[id]++;
+		}
+		return counts;
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
 		throw e;

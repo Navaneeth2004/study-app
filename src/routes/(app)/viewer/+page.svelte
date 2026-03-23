@@ -1,42 +1,38 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { pb } from '$lib/shared/pocketbase';
-	import { getCurrentUser } from '$lib/auth/authService';
+	import {
+		listMyTextbooks, listChapters, listMyCategories,
+		listFlashcardsByCategory
+	} from '$lib/viewer/viewerService';
 	import ViewerTextbookCard from '$lib/viewer/components/ViewerTextbookCard.svelte';
 	import ViewerDeckCard from '$lib/viewer/components/ViewerDeckCard.svelte';
+	import { getCurrentUser } from '$lib/auth/authService';
+	import { pb } from '$lib/shared/pocketbase';
 	import EmptyState from '$lib/shared/components/EmptyState.svelte';
+	import type { Textbook } from '$lib/creator/creatorTypes';
+	import type { FlashcardCategory } from '$lib/creator/flashcardTypes';
 
-	interface TextbookItem {
-		id: string; title: string; description: string; owner: string;
-		created: string; updated: string; chapterCount: number;
-		isOwn: boolean; authorName: string; isFork: boolean; forkedFromAuthor: string;
+	interface TextbookWithCount extends Textbook {
+		chapterCount: number;
+		isOwn: boolean;
+		ownerName: string;
+		isFork: boolean;
+		forkedFromAuthor: string;
 	}
 	interface DeckItem {
 		id: string; name: string; subtitle: string; cardCount: number;
-		href: string; isOwn: boolean; authorName: string;
+		href: string; isOwn: boolean; authorName: string; ownerId?: string;
 		isFork: boolean; forkedFromAuthor: string;
 	}
 
 	const user = getCurrentUser();
-	const uid = user?.id ?? '';
 
-	let textbooks = $state<TextbookItem[]>([]);
+	let textbooks = $state<TextbookWithCount[]>([]);
 	let decks = $state<DeckItem[]>([]);
 	let loadingTextbooks = $state(true);
 	let loadingDecks = $state(true);
 	let error = $state('');
-
-	/** Fetch a user's display name — direct lookup bypasses API rule expand restrictions */
-	async function getUserName(userId: string): Promise<string> {
-		if (!userId) return '';
-		try {
-			const r = await pb.collection('users').getOne(userId, { requestKey: null });
-			return (r.name as string) || (r.email as string) || '';
-		} catch {
-			return '';
-		}
-	}
 
 	onMount(async () => {
 		await Promise.all([loadTextbooks(), loadDecks()]);
@@ -45,6 +41,8 @@
 	async function loadTextbooks() {
 		loadingTextbooks = true;
 		try {
+			// Fetch own + installed textbooks with forkedFrom field
+			const uid = user?.id ?? '';
 			const own = await pb.collection('textbooks').getFullList({
 				requestKey: null, filter: `owner = "${uid}"`, sort: '-created'
 			});
@@ -52,58 +50,57 @@
 				requestKey: null, filter: `user = "${uid}" && contentType = "textbook"`
 			});
 			const installedIds = installs.map((i) => i.contentId as string);
-			const installedRaw = installedIds.length > 0
+			const installedRecords = installedIds.length > 0
 				? await Promise.all(installedIds.map((id) =>
-					pb.collection('textbooks').getOne(id, { requestKey: null }).catch(() => null)
+					pb.collection('textbooks').getOne(id, { requestKey: null, expand: 'owner' }).catch(() => null)
 				))
 				: [];
 
 			const ownSet = new Set(own.map((r) => r.id as string));
-
-			const items: TextbookItem[] = await Promise.all([
-				...own.map(async (r) => {
-					const chapters = await pb.collection('chapters').getFullList({
-						requestKey: null, filter: `textbook = "${r.id}"`, fields: 'id'
-					});
-					return {
-						id: r.id as string,
-						title: r.title as string,
-						description: (r.description as string) ?? '',
-						owner: r.owner as string,
-						created: r.created as string,
-						updated: r.updated as string,
-						chapterCount: chapters.length,
-						isOwn: true,
-						authorName: '',
-						isFork: !!(r.forkedFrom as string),
-						forkedFromAuthor: (r.forkedFromAuthor as string) ?? ''
-					};
-				}),
-				...installedRaw
+			const allRecords = [
+				...own.map((r) => ({ r, isOwn: true, ownerName: user?.name || user?.email || '' })),
+				...installedRecords
 					.filter((r): r is NonNullable<typeof r> => r !== null && !ownSet.has(r.id as string))
-					.map(async (r) => {
-						const [chapters, ownerName] = await Promise.all([
-							pb.collection('chapters').getFullList({
-								requestKey: null, filter: `textbook = "${r.id}"`, fields: 'id'
-							}),
-							getUserName(r.owner as string)
-						]);
-						return {
-							id: r.id as string,
-							title: r.title as string,
-							description: (r.description as string) ?? '',
-							owner: r.owner as string,
-							created: r.created as string,
-							updated: r.updated as string,
-							chapterCount: chapters.length,
-							isOwn: false,
-							authorName: ownerName,
-							isFork: !!(r.forkedFrom as string),
-							forkedFromAuthor: (r.forkedFromAuthor as string) ?? ''
-						};
-					})
-			]);
-			textbooks = items;
+					.map((r) => ({
+						r,
+						isOwn: false,
+						ownerName: ((r.expand?.owner as Record<string, unknown>)?.name as string) || 'Anonymous'
+					}))
+			];
+
+			// Fetch chapter counts in one query using getList with counts
+			const allTbIds = allRecords.map(({ r }) => r.id as string);
+			let chapterCounts: Record<string, number> = {};
+			if (allTbIds.length > 0) {
+				try {
+					const chaps = await pb.collection('chapters').getFullList({
+						requestKey: null,
+						filter: '(' + allTbIds.map((id) => `textbook = "${id}"`).join(' || ') + ')',
+						fields: 'id,textbook'
+					});
+					for (const ch of chaps) {
+						const tid = ch.textbook as string;
+						chapterCounts[tid] = (chapterCounts[tid] ?? 0) + 1;
+					}
+				} catch { /* chapters fetch failed — show 0 counts */ }
+			}
+
+			textbooks = allRecords.map(({ r, isOwn, ownerName }) => {
+				const isFork = !!(r.forkedFrom as string);
+				return {
+					id: r.id as string,
+					title: r.title as string,
+					description: (r.description as string) ?? '',
+					owner: r.owner as string,
+					ownerName,
+					created: r.created as string,
+					updated: r.updated as string,
+					chapterCount: chapterCounts[r.id as string] ?? 0,
+					isOwn,
+					isFork,
+					forkedFromAuthor: (r.forkedFromAuthor as string) ?? ''
+				};
+			});
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load textbooks.';
 		} finally {
@@ -114,6 +111,7 @@
 	async function loadDecks() {
 		loadingDecks = true;
 		try {
+			const uid = user?.id ?? '';
 			const own = await pb.collection('flashcard_categories').getFullList({
 				requestKey: null, filter: `owner = "${uid}"`, sort: 'name'
 			});
@@ -121,53 +119,52 @@
 				requestKey: null, filter: `user = "${uid}" && contentType = "flashcard_category"`
 			});
 			const installedIds = installs.map((i) => i.contentId as string);
-			const installedRaw = installedIds.length > 0
+			const installedRecords = installedIds.length > 0
 				? await Promise.all(installedIds.map((id) =>
-					pb.collection('flashcard_categories').getOne(id, { requestKey: null }).catch(() => null)
+					pb.collection('flashcard_categories').getOne(id, { requestKey: null, expand: 'owner' }).catch(() => null)
 				))
 				: [];
 
 			const ownSet = new Set(own.map((r) => r.id as string));
-
-			const items: DeckItem[] = await Promise.all([
-				...own.map(async (r) => {
-					const cards = await pb.collection('flashcards').getFullList({
-						requestKey: null, filter: `category = "${r.id}"`, fields: 'id'
-					});
-					return {
-						id: r.id as string,
-						name: r.name as string,
-						subtitle: (r.description as string) ?? '',
-						cardCount: cards.length,
-						href: `/viewer/flashcards/category/${r.id}`,
-						isOwn: true,
-						authorName: '',
-						isFork: !!(r.forkedFrom as string),
-						forkedFromAuthor: (r.forkedFromAuthor as string) ?? ''
-					};
-				}),
-				...installedRaw
+			const allRecords = [
+				...own.map((r) => ({ r, isOwn: true, ownerName: user?.name || user?.email || '' })),
+				...installedRecords
 					.filter((r): r is NonNullable<typeof r> => r !== null && !ownSet.has(r.id as string))
-					.map(async (r) => {
-						const [cards, ownerName] = await Promise.all([
-							pb.collection('flashcards').getFullList({
-								requestKey: null, filter: `category = "${r.id}"`, fields: 'id'
-							}),
-							getUserName(r.owner as string)
-						]);
-						return {
-							id: r.id as string,
-							name: r.name as string,
-							subtitle: (r.description as string) ?? '',
-							cardCount: cards.length,
-							href: `/viewer/flashcards/category/${r.id}`,
-							isOwn: false,
-							authorName: ownerName,
-							isFork: !!(r.forkedFrom as string),
-							forkedFromAuthor: (r.forkedFromAuthor as string) ?? ''
-						};
-					})
-			]);
+					.map((r) => ({
+						r,
+						isOwn: false,
+						ownerName: ((r.expand?.owner as Record<string, unknown>)?.name as string) || 'Anonymous'
+					}))
+			];
+
+			const allCatIds = allRecords.map(({ r }) => r.id as string);
+			let cardCounts: Record<string, number> = {};
+			if (allCatIds.length > 0) {
+				try {
+					const cards = await pb.collection('flashcards').getFullList({
+						requestKey: null,
+						filter: '(' + allCatIds.map((id) => `category = "${id}"`).join(' || ') + ')',
+						fields: 'id,category'
+					});
+					for (const card of cards) {
+						const cid = card.category as string;
+						cardCounts[cid] = (cardCounts[cid] ?? 0) + 1;
+					}
+				} catch { /* silent */ }
+			}
+
+			const items: DeckItem[] = allRecords.map(({ r, isOwn, ownerName }) => ({
+				id: r.id as string,
+				name: r.name as string,
+				subtitle: (r.description as string) ?? '',
+				cardCount: cardCounts[r.id as string] ?? 0,
+				href: `/viewer/flashcards/category/${r.id}`,
+				isOwn,
+				ownerId: r.owner as string,
+				authorName: ownerName,
+				isFork: !!(r.forkedFrom as string),
+				forkedFromAuthor: (r.forkedFromAuthor as string) ?? ''
+			}));
 			decks = items;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load decks.';
@@ -212,7 +209,7 @@
 						textbook={book}
 						chapterCount={book.chapterCount}
 						isOwn={book.isOwn}
-						authorName={book.authorName}
+						authorName={book.ownerName ?? ''}
 						isFork={book.isFork}
 						forkedFromAuthor={book.forkedFromAuthor}
 						onClick={() => goto(`/viewer/textbooks/${book.id}`)}
@@ -236,13 +233,14 @@
 			<EmptyState heading="No flashcard decks yet" description="Your flashcard categories will appear here." />
 		{:else}
 			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-				{#each decks as deck (deck.id)}
+				{#each decks as deck (deck.id + deck.href)}
 					<ViewerDeckCard
 						name={deck.name}
 						subtitle={deck.subtitle}
 						cardCount={deck.cardCount}
 						isOwn={deck.isOwn}
 						authorName={deck.authorName}
+						ownerId={deck.ownerId ?? ''}
 						isFork={deck.isFork}
 						forkedFromAuthor={deck.forkedFromAuthor}
 						onClick={() => goto(deck.href)}

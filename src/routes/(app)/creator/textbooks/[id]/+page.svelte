@@ -184,7 +184,7 @@
 		{#if chapters.length === 0}
 			<EmptyState heading="No chapters yet" description="Add your first chapter to start building." />
 		{:else}
-			<div role="list" class="flex flex-col gap-2">
+			<div role="list" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 				{#each chapters as chapter (chapter.id)}
 					<ChapterRow {chapter} textbookId={textbookId}
 						onDelete={handleDeleteChapter}

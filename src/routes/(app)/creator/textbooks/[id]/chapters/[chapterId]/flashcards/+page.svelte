@@ -125,7 +125,7 @@
 	/>
 {/if}
 
-<div class="flex flex-col gap-6 max-w-2xl">
+<div class="flex flex-col gap-6">
 	<!-- Breadcrumb -->
 	<nav class="flex items-center gap-2 text-sm flex-wrap">
 		<a href="/creator" class="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">Creator</a>
@@ -195,7 +195,7 @@
 			description="Add flashcards to this chapter."
 		/>
 	{:else}
-		<div role="list" class="flex flex-col gap-2">
+		<div role="list" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 			{#each flashcards as card (card.id)}
 				<FlashcardCard
 					flashcard={card}

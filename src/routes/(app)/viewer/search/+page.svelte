@@ -11,21 +11,26 @@
 	import SearchDeckCard from '$lib/viewer/components/search/SearchDeckCard.svelte';
 	import SearchResultGroup from '$lib/search/components/SearchResultGroup.svelte';
 	import { pb } from '$lib/shared/pocketbase';
+	import { searchUsers, isFollowing, followUser, unfollowUser } from '$lib/profile/profileService';
+	import UserSearchCard from '$lib/profile/components/UserSearchCard.svelte';
+	import type { PublicProfile } from '$lib/profile/profileTypes';
 	import type { SearchResults } from '$lib/search/searchTypes';
 	import type { SharedTextbook, SharedCategory, Install } from '$lib/sharing/sharingTypes';
 
-	type Mode = 'my' | 'universal';
+	type Mode = 'my' | 'universal' | 'people';
 
 	function getMyId(): string { return (pb.authStore.record?.id as string) ?? ''; }
 
 	let query = $state('');
-	let mode = $state<Mode>('my');
+	let mode = $state<'my' | 'universal' | 'people'>('my');
 	let myResults = $state<SearchResults | null>(null);
 	let sharedTextbooks = $state<SharedTextbook[]>([]);
 	let sharedCategories = $state<SharedCategory[]>([]);
 	let installs = $state<Install[]>([]);
 	let searching = $state(false);
 	let error = $state('');
+	let peopleResults = $state<PublicProfile[]>([]);
+	let peopleFollowMap = $state<Map<string, string | null>>(new Map());
 	let inputEl: HTMLInputElement;
 	let debounceTimer: ReturnType<typeof setTimeout>;
 
@@ -47,21 +52,46 @@
 	});
 
 	async function runSearch(q: string, m: Mode) {
-		if (!q.trim()) { myResults = null; sharedTextbooks = []; sharedCategories = []; return; }
+		if (!q.trim() && m !== 'people') { myResults = null; sharedTextbooks = []; sharedCategories = []; peopleResults = []; peopleFollowMap = new Map(); return; }
 		searching = true; error = '';
 		try {
 			if (m === 'my') {
 				myResults = await searchOwn(q);
-			} else {
+			} else if (m === 'universal') {
 				[sharedTextbooks, sharedCategories] = await Promise.all([
 					getSharedTextbooks(q),
 					getSharedCategories(q)
 				]);
 				sharedTextbooks = sharedTextbooks.filter((t) => t.owner !== getMyId());
 				sharedCategories = sharedCategories.filter((c) => c.owner !== getMyId());
+			} else {
+				// People search
+				peopleResults = await searchUsers(q);
+				const map = new Map<string, string | null>();
+				await Promise.all(peopleResults.map(async (p) => {
+					const fid = await isFollowing(p.id);
+					map.set(p.id, fid);
+				}));
+				peopleFollowMap = map;
 			}
 		} catch (e) { error = e instanceof Error ? e.message : 'Search failed.'; }
 		finally { searching = false; }
+	}
+
+	async function handleFollowPerson(profile: PublicProfile) {
+		try {
+			const f = await followUser(profile.id);
+			peopleFollowMap = new Map([...peopleFollowMap, [profile.id, f.id]]);
+		} catch { /* silent */ }
+	}
+
+	async function handleUnfollowPerson(profile: PublicProfile) {
+		const fid = peopleFollowMap.get(profile.id);
+		if (!fid) return;
+		try {
+			await unfollowUser(fid);
+			peopleFollowMap = new Map([...peopleFollowMap, [profile.id, null]]);
+		} catch { /* silent */ }
 	}
 
 	async function handleInstallTextbook(item: SharedTextbook) {
@@ -123,7 +153,14 @@
 		<button onclick={() => (mode = 'universal')}
 			class="flex-1 rounded-lg py-1.5 text-sm font-medium transition-colors
 			       {mode === 'universal' ? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}">
-			Universal Search
+			Universal
+		</button>
+		<button
+			onclick={() => (mode = 'people')}
+			class="flex-1 rounded-lg py-1.5 text-sm font-medium transition-colors
+			       {mode === 'people' ? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}"
+		>
+			People
 		</button>
 	</div>
 
@@ -149,6 +186,25 @@
 				<SearchResultGroup title="Content" items={myResults.blocks} />
 				<SearchResultGroup title="Flashcard Decks" items={myResults.categories} />
 				<SearchResultGroup title="Flashcards" items={myResults.flashcards} />
+			</div>
+		{/if}
+
+	{:else if mode === 'people'}
+		{#if !query.trim()}
+			<p class="text-sm text-[var(--color-text-muted)]">Search for users by name.</p>
+		{:else if peopleResults.length === 0 && !searching}
+			<p class="text-sm text-[var(--color-text-muted)]">No users found for "{query}".</p>
+		{:else}
+			<div class="flex flex-col gap-2">
+				{#each peopleResults as person (person.id)}
+					<UserSearchCard
+						profile={person}
+						isFollowing={!!peopleFollowMap.get(person.id)}
+						onFollow={() => handleFollowPerson(person)}
+						onUnfollow={() => handleUnfollowPerson(person)}
+						onNavigate={() => goto(`/profile/${person.id}`)}
+					/>
+				{/each}
 			</div>
 		{/if}
 

@@ -1,7 +1,9 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import Sidebar from '$lib/shared/components/Sidebar.svelte';
 	import TopBar from '$lib/shared/components/TopBar.svelte';
 	import NotificationPermissionBanner from '$lib/shared/components/NotificationPermissionBanner.svelte';
+	import { startPolling, stopPolling } from '$lib/notifications/notificationPoller';
 
 	interface Props {
 		children: import('svelte').Snippet;
@@ -12,6 +14,11 @@
 	let sidebarOpen = $state(false);
 	function toggleSidebar() { sidebarOpen = !sidebarOpen; }
 	function closeSidebar() { sidebarOpen = false; }
+
+	onMount(() => {
+		startPolling();
+		return () => stopPolling();
+	});
 </script>
 
 <div class="min-h-screen bg-[var(--color-surface-950)]">

@@ -21,7 +21,7 @@
 		{ value: 5, emoji: '🤩', label: 'Amazing' }
 	];
 
-	let isMarked = $state(day.log !== null);
+	// Start with the existing log values, or defaults for a new log
 	let description = $state(day.log?.description ?? '');
 	let mood = $state<MoodRating | null>(day.log?.mood ?? null);
 	let duration = $state<number | null>(day.log?.duration ?? null);
@@ -30,7 +30,6 @@
 	let showUnsaved = $state(false);
 
 	const isDirty = $derived(
-		isMarked !== (day.log !== null) ||
 		description !== (day.log?.description ?? '') ||
 		mood !== (day.log?.mood ?? null) ||
 		duration !== (day.log?.duration ?? null)
@@ -54,23 +53,18 @@
 
 	async function handleDelete() {
 		error = '';
-		try {
-			await onDelete();
-			onClose();
-		} catch (e) { error = e instanceof Error ? e.message : 'Could not delete.'; }
+		try { await onDelete(); onClose(); }
+		catch (e) { error = e instanceof Error ? e.message : 'Could not delete.'; }
 	}
 </script>
 
-<!-- Backdrop -->
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <div class="fixed inset-0 z-40 flex items-center justify-center p-4 bg-black/70" onclick={attemptClose}>
-	<!-- Modal -->
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 	<div class="relative w-full max-w-md rounded-2xl border border-[var(--color-surface-700)]
 	            bg-[var(--color-surface-950)] shadow-2xl"
 	     onclick={(e) => e.stopPropagation()}>
 
-		<!-- Header -->
 		<div class="flex items-center justify-between border-b border-[var(--color-surface-700)] px-5 py-4">
 			<div class="flex flex-col gap-0.5">
 				<span class="text-sm font-semibold text-[var(--color-text-primary)]">{dateLabel}</span>
@@ -87,39 +81,23 @@
 			</button>
 		</div>
 
-		<!-- Body -->
 		<div class="flex flex-col gap-4 p-5">
 			{#if day.isFuture}
 				<p class="text-sm text-[var(--color-text-muted)]">You can't log future dates.</p>
-			{:else if !isMarked}
-				<p class="text-sm text-[var(--color-text-secondary)]">Did you study on this day?</p>
-				<button onclick={() => (isMarked = true)}
-					class="flex items-center gap-2 self-start rounded-xl bg-[var(--color-accent-500)] px-4 py-2
-					       text-sm font-medium text-white hover:bg-[var(--color-accent-400)] transition-colors">
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-						<polyline points="20 6 9 17 4 12"/>
-					</svg>
-					Mark as studied
-				</button>
 			{:else}
+				<!-- Always show the log form directly — no "Did you study?" gate -->
 				<div class="flex items-center gap-2">
 					<span class="flex items-center gap-1.5 text-sm font-medium text-[var(--color-success-500)]">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
 							<polyline points="20 6 9 17 4 12"/>
 						</svg>
-						Studied
+						{day.log ? 'Studied' : 'Log a study session'}
 					</span>
-					{#if !day.log}
-						<button onclick={() => (isMarked = false)}
-							class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
-							Undo
-						</button>
-					{/if}
 				</div>
 
 				<div class="flex flex-col gap-3">
 					<div class="flex flex-col gap-1.5">
-						<label for="day-desc" class="text-xs font-medium text-[var(--color-text-secondary)]">What did you study?</label>
+						<label for="day-desc" class="text-xs font-medium text-[var(--color-text-secondary)]">What did you study? (optional)</label>
 						<textarea id="day-desc" bind:value={description} rows={2}
 							placeholder="e.g. Chapter 3 of calculus, flashcard review…"
 							class="w-full resize-none rounded-xl border border-[var(--color-surface-600)]
@@ -168,7 +146,7 @@
 								<button onclick={() => (confirmDelete = true)}
 									class="ml-auto rounded-xl border border-[var(--color-surface-600)] px-4 py-2 text-sm
 									       text-[var(--color-text-secondary)] hover:text-[var(--color-error-400)] transition-colors">
-									Delete log
+									Delete
 								</button>
 							{:else}
 								<button onclick={handleDelete} disabled={saving}

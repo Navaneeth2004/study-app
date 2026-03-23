@@ -6,7 +6,8 @@
 	import {
 		shareTextbook, unshareTextbook,
 		shareCategory, unshareCategory,
-		getTextbookSharingStates, getCategorySharingStates
+		getTextbookSharingStates, getCategorySharingStates,
+		getInstallCounts
 	} from '$lib/sharing/sharingService';
 	import { verifyPassword } from '$lib/auth/authService';
 	import PasswordInput from '$lib/shared/components/PasswordInput.svelte';
@@ -26,6 +27,7 @@
 	let textbooks = $state<Textbook[]>([]);
 	let categories = $state<FlashcardCategory[]>([]);
 	let sharedStates = $state<Record<string, SharedState>>({});
+	let installCounts = $state<Record<string, number>>({});
 	let editingId = $state<string | null>(null);
 	let editTitle = $state('');
 	let editDesc = $state('');
@@ -34,6 +36,7 @@
 	let loading = $state(true);
 	let error = $state('');
 
+	// Password gate
 	let pendingAction = $state<PendingAction | null>(null);
 	let passwordValue = $state('');
 	let passwordError = $state('');
@@ -55,6 +58,13 @@
 				states[s.id] = { isShared: s.isShared, shareTitle: s.shareTitle, shareDescription: s.shareDescription };
 			}
 			sharedStates = states;
+			// Load install counts for all shared items
+			const sharedIds = [...bookStates, ...catStates]
+				.filter((s) => s.isShared)
+				.map((s) => s.id);
+			if (sharedIds.length > 0) {
+				installCounts = await getInstallCounts(sharedIds);
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load content.';
 		} finally {
@@ -62,6 +72,7 @@
 		}
 	});
 
+	// Step 1: validate content is not empty, then request password
 	let validating = $state(false);
 	let validationError = $state<Record<string, string>>({});
 
@@ -99,6 +110,7 @@
 		pendingAction = { id, action: 'unshare', type };
 	}
 
+	// Step 2: verify password, then proceed
 	async function handlePasswordConfirm() {
 		if (!pendingAction || !passwordValue.trim()) return;
 		verifying = true;
@@ -110,12 +122,14 @@
 				return;
 			}
 			if (pendingAction.action === 'share') {
+				// Open the share form
 				const existing = sharedStates[pendingAction.id];
 				editTitle = existing?.shareTitle ?? '';
 				editDesc = existing?.shareDescription ?? '';
 				editingId = pendingAction.id;
 				pendingAction = null;
 			} else {
+				// Open the unshare confirm
 				confirmUnshareId = pendingAction.id;
 				pendingAction = null;
 			}
@@ -169,6 +183,7 @@
 		</p>
 	</div>
 
+	<!-- Tab bar -->
 	<div class="flex gap-1 border-b border-[var(--color-surface-700)]">
 		<button onclick={() => (tab = 'textbooks')}
 			class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors
@@ -208,13 +223,17 @@
 
 					<div class="flex flex-col gap-3 rounded-xl border border-[var(--color-surface-700)]
 					            bg-[var(--color-surface-800)] p-4">
+						<!-- Item header -->
 						<div class="flex items-center justify-between gap-3">
 							<span class="flex-1 truncate text-sm font-medium text-[var(--color-text-primary)]">
 								{'title' in item ? item.title : item.name}
 							</span>
 							{#if isShared}
-								<div class="flex items-center gap-2">
+								<div class="flex items-center gap-3">
 									<span class="text-xs font-medium text-[var(--color-success-500)]">Shared</span>
+									{#if (installCounts[item.id] ?? 0) > 0}
+										<span class="text-xs text-[var(--color-text-muted)]">{installCounts[item.id]} {installCounts[item.id] === 1 ? 'install' : 'installs'}</span>
+									{/if}
 									<button onclick={() => requestShare(item.id, type)}
 										class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
 										Edit
@@ -233,6 +252,7 @@
 							{/if}
 						</div>
 
+						<!-- Already shared info -->
 						{#if isShared && state?.shareTitle && editingId !== item.id}
 							<div class="flex flex-col gap-0.5">
 								<p class="text-xs font-medium text-[var(--color-text-secondary)]">{state.shareTitle}</p>
@@ -242,10 +262,12 @@
 							</div>
 						{/if}
 
+						<!-- Validation error (empty content) -->
 						{#if validationError[item.id]}
 							<p class="text-xs text-[var(--color-error-400)]">{validationError[item.id]}</p>
 						{/if}
 
+						<!-- Password gate -->
 						{#if pendingAction?.id === item.id}
 							<div class="flex flex-col gap-3 rounded-lg border border-[var(--color-surface-600)]
 							            bg-[var(--color-surface-900)] p-3">
@@ -279,6 +301,7 @@
 							</div>
 						{/if}
 
+						<!-- Unshare confirm -->
 						{#if confirmUnshareId === item.id}
 							<div class="flex flex-col gap-3 rounded-lg border border-[var(--color-warning-500)]/30
 							            bg-[var(--color-warning-500)]/5 p-3">
@@ -301,23 +324,24 @@
 							</div>
 						{/if}
 
+						<!-- Share / edit form -->
 						{#if editingId === item.id}
 							<div class="flex flex-col gap-3">
 								<div class="flex flex-col gap-1.5">
-									<label for="share-title-{item.id}" class="text-xs font-medium text-[var(--color-text-secondary)]">
+									<label class="text-xs font-medium text-[var(--color-text-secondary)]">
 										Display title <span class="text-[var(--color-error-400)]">*</span>
 									</label>
-									<input id="share-title-{item.id}" bind:value={editTitle} type="text" placeholder="How it appears in search…"
+									<input bind:value={editTitle} type="text" placeholder="How it appears in search…"
 										class="w-full rounded-lg border border-[var(--color-surface-600)]
 										       bg-[var(--color-surface-900)] px-3 py-2 text-sm
 										       text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]
 										       focus:outline-none focus:border-[var(--color-accent-500)] transition-colors" />
 								</div>
 								<div class="flex flex-col gap-1.5">
-									<label for="share-desc-{item.id}" class="text-xs font-medium text-[var(--color-text-secondary)]">
+									<label class="text-xs font-medium text-[var(--color-text-secondary)]">
 										Description (optional)
 									</label>
-									<input id="share-desc-{item.id}" bind:value={editDesc} type="text" placeholder="Brief description for search results…"
+									<input bind:value={editDesc} type="text" placeholder="Brief description for search results…"
 										class="w-full rounded-lg border border-[var(--color-surface-600)]
 										       bg-[var(--color-surface-900)] px-3 py-2 text-sm
 										       text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]
