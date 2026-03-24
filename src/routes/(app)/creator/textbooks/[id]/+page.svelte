@@ -157,7 +157,7 @@
 {:else if error}
 	<p class="text-sm text-[var(--color-error-400)]">{error}</p>
 {:else if textbook}
-	<div class="flex flex-col gap-8 max-w-2xl">
+	<div class="flex flex-col gap-8">
 		<div class="flex items-start justify-between gap-4">
 			<div class="flex flex-col gap-2 flex-1">
 				<InlineEdit bind:value={textbook.title} placeholder="Textbook title"

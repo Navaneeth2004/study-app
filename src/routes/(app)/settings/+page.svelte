@@ -1,10 +1,10 @@
 <script lang="ts">
-	import AccountSection from '$lib/settings/components/AccountSection.svelte';
 	import RoleSection from '$lib/settings/components/RoleSection.svelte';
 	import AISettingsSection from '$lib/settings/components/AISettingsSection.svelte';
 	import SharingSection from '$lib/settings/components/SharingSection.svelte';
 	import InstalledContentSection from '$lib/settings/components/InstalledContentSection.svelte';
 	import ExportImportSection from '$lib/settings/components/ExportImportSection.svelte';
+	import AccountSection from '$lib/settings/components/AccountSection.svelte';
 </script>
 
 <svelte:head>
@@ -17,10 +17,12 @@
 		<p class="text-[var(--color-text-secondary)]">Manage your account and preferences.</p>
 	</div>
 
-	<AccountSection />
 	<RoleSection />
 	<AISettingsSection />
 	<SharingSection />
 	<InstalledContentSection />
 	<ExportImportSection />
+
+	<!-- Account (with delete) always at the very bottom -->
+	<AccountSection />
 </div>

@@ -41,69 +41,67 @@
 	async function loadTextbooks() {
 		loadingTextbooks = true;
 		try {
-			// Fetch own + installed textbooks with forkedFrom field
 			const uid = user?.id ?? '';
+			// Step 1: load own textbooks (always fast, always works)
 			const own = await pb.collection('textbooks').getFullList({
 				requestKey: null, filter: `owner = "${uid}"`, sort: '-created'
 			});
-			const installs = await pb.collection('installs').getFullList({
-				requestKey: null, filter: `user = "${uid}" && contentType = "textbook"`
-			});
-			const installedIds = installs.map((i) => i.contentId as string);
-			const installedRecords = installedIds.length > 0
-				? await Promise.all(installedIds.map((id) =>
-					pb.collection('textbooks').getOne(id, { requestKey: null, expand: 'owner' }).catch(() => null)
-				))
-				: [];
 
-			const ownSet = new Set(own.map((r) => r.id as string));
+			// Step 2: load installs (non-blocking if fails)
+			let installedRecords: Array<Record<string, unknown>> = [];
+			try {
+				const installs = await pb.collection('installs').getFullList({
+					requestKey: null, filter: `user = "${uid}" && contentType = "textbook"`
+				});
+				const ownSet = new Set(own.map((r) => r.id as string));
+				const ids = installs.map((i) => i.contentId as string).filter((id) => !ownSet.has(id));
+				if (ids.length > 0) {
+					const results = await Promise.all(ids.map((id) =>
+						pb.collection('textbooks').getOne(id, { requestKey: null, expand: 'owner' }).catch(() => null)
+					));
+					installedRecords = results.filter((r): r is Record<string, unknown> => r !== null);
+				}
+			} catch { /* installs fetch failed silently */ }
+
 			const allRecords = [
-				...own.map((r) => ({ r, isOwn: true, ownerName: user?.name || user?.email || '' })),
-				...installedRecords
-					.filter((r): r is NonNullable<typeof r> => r !== null && !ownSet.has(r.id as string))
-					.map((r) => ({
-						r,
-						isOwn: false,
-						ownerName: ((r.expand?.owner as Record<string, unknown>)?.name as string) || 'Anonymous'
-					}))
+				...own.map((r) => ({ r: r as Record<string, unknown>, isOwn: true, ownerName: user?.name || user?.email || '' })),
+				...installedRecords.map((r) => ({
+					r, isOwn: false,
+					ownerName: ((r.expand?.owner as Record<string, unknown>)?.name as string) || 'Anonymous'
+				}))
 			];
 
-			// Fetch chapter counts in one query using getList with counts
-			const allTbIds = allRecords.map(({ r }) => r.id as string);
-			let chapterCounts: Record<string, number> = {};
-			if (allTbIds.length > 0) {
+			// Step 3: Show cards immediately with chapterCount 0, then update counts
+			textbooks = allRecords.map(({ r, isOwn, ownerName }) => ({
+				id: r.id as string, title: r.title as string,
+				description: (r.description as string) ?? '',
+				owner: r.owner as string, ownerName,
+				created: r.created as string, updated: r.updated as string,
+				chapterCount: 0, isOwn, isFork: !!(r.forkedFrom as string),
+				forkedFromAuthor: (r.forkedFromAuthor as string) ?? ''
+			}));
+			loadingTextbooks = false; // Show cards NOW
+
+			// Step 4: Load chapter counts in background (non-blocking)
+			if (allRecords.length > 0) {
 				try {
+					const allTbIds = allRecords.map(({ r }) => r.id as string);
 					const chaps = await pb.collection('chapters').getFullList({
 						requestKey: null,
 						filter: '(' + allTbIds.map((id) => `textbook = "${id}"`).join(' || ') + ')',
 						fields: 'id,textbook'
 					});
+					const counts: Record<string, number> = {};
 					for (const ch of chaps) {
 						const tid = ch.textbook as string;
-						chapterCounts[tid] = (chapterCounts[tid] ?? 0) + 1;
+						counts[tid] = (counts[tid] ?? 0) + 1;
 					}
-				} catch { /* chapters fetch failed — show 0 counts */ }
+					// Update counts without re-triggering skeleton
+					textbooks = textbooks.map((t) => ({ ...t, chapterCount: counts[t.id] ?? 0 }));
+				} catch { /* chapter counts are optional */ }
 			}
-
-			textbooks = allRecords.map(({ r, isOwn, ownerName }) => {
-				const isFork = !!(r.forkedFrom as string);
-				return {
-					id: r.id as string,
-					title: r.title as string,
-					description: (r.description as string) ?? '',
-					owner: r.owner as string,
-					ownerName,
-					created: r.created as string,
-					updated: r.updated as string,
-					chapterCount: chapterCounts[r.id as string] ?? 0,
-					isOwn,
-					isFork,
-					forkedFromAuthor: (r.forkedFromAuthor as string) ?? ''
-				};
-			});
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load textbooks.';
-		} finally {
 			loadingTextbooks = false;
 		}
 	}

@@ -52,7 +52,7 @@
 	});
 
 	async function runSearch(q: string, m: Mode) {
-		if (!q.trim() && m !== 'people') { myResults = null; sharedTextbooks = []; sharedCategories = []; peopleResults = []; peopleFollowMap = new Map(); return; }
+		if (!q.trim()) { myResults = null; sharedTextbooks = []; sharedCategories = []; peopleResults = []; peopleFollowMap = new Map(); return; }
 		searching = true; error = '';
 		try {
 			if (m === 'my') {
@@ -65,8 +65,9 @@
 				sharedTextbooks = sharedTextbooks.filter((t) => t.owner !== getMyId());
 				sharedCategories = sharedCategories.filter((c) => c.owner !== getMyId());
 			} else {
-				// People search
-				peopleResults = await searchUsers(q);
+				// People search — exclude self
+				const allPeople = await searchUsers(q);
+				peopleResults = allPeople.filter((p) => p.id !== getMyId());
 				const map = new Map<string, string | null>();
 				await Promise.all(peopleResults.map(async (p) => {
 					const fid = await isFollowing(p.id);

@@ -11,13 +11,13 @@
 
 	let { open, onClose }: Props = $props();
 
-	const viewerNav: NavItem[] = [
+		const viewerNav: NavItem[] = [
 		{ href: '/viewer', label: 'Home', icon: 'home' },
-		{ href: '/calendar', label: 'Calendar', icon: 'calendar' },
 		{ href: '/viewer/flashcards', label: 'Flashcard Decks', icon: 'cards' },
 		{ href: '/viewer/search', label: 'Search', icon: 'search' },
 		{ href: '/profile', label: 'Profile', icon: 'profile' },
 		{ href: '/notifications', label: 'Notifications', icon: 'bell' },
+		{ href: '/calendar', label: 'Calendar', icon: 'calendar' },
 		{ href: '/settings', label: 'Settings', icon: 'settings' }
 	];
 
