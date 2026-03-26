@@ -3,6 +3,7 @@
 	import { roleStore } from '$lib/shared/stores/roleStore';
 	import type { NavItem } from '$lib/shared/types/layoutTypes';
 	import { unreadCountStore } from '$lib/notifications/notificationPoller';
+	import { reviewDueCountStore } from '$lib/review/reviewDueCountStore';
 
 	interface Props {
 		open: boolean;
@@ -11,9 +12,10 @@
 
 	let { open, onClose }: Props = $props();
 
-		const viewerNav: NavItem[] = [
+	const viewerNav: NavItem[] = [
 		{ href: '/viewer', label: 'Home', icon: 'home' },
 		{ href: '/viewer/flashcards', label: 'Flashcard Decks', icon: 'cards' },
+		{ href: '/review', label: 'Review', icon: 'review' },
 		{ href: '/viewer/search', label: 'Search', icon: 'search' },
 		{ href: '/profile', label: 'Profile', icon: 'profile' },
 		{ href: '/notifications', label: 'Notifications', icon: 'bell' },
@@ -30,10 +32,11 @@
 		const path = $page.url.pathname;
 		if (href === '/viewer') return path === '/viewer';
 		if (href === '/viewer/flashcards') return path.startsWith('/viewer/flashcards');
+		if (href === '/review') return path.startsWith('/review');
 		if (href === '/creator') {
 			return path === '/creator' || path.startsWith('/creator/textbooks');
 		}
-			if (href === '/profile') return path === '/profile';
+		if (href === '/profile') return path === '/profile';
 		return path.startsWith(href);
 	}
 </script>
@@ -88,6 +91,19 @@
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
 							<rect x="2" y="4" width="14" height="10" rx="2"/><rect x="8" y="10" width="14" height="10" rx="2"/>
 						</svg>
+					{:else if item.icon === 'review'}
+						<div class="relative">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/>
+								<path d="M12 6v6l4 2"/>
+							</svg>
+							{#if $reviewDueCountStore > 0}
+								<span class="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full
+								            bg-[var(--color-error-500)] text-white text-[10px] font-bold leading-none">
+									{$reviewDueCountStore > 9 ? '9+' : $reviewDueCountStore}
+								</span>
+							{/if}
+						</div>
 					{:else if item.icon === 'calendar'}
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
 							<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
@@ -125,7 +141,7 @@
 				<span class="px-3 pb-1 text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">
 					Creator
 				</span>
-					{#each creatorNav as item}
+				{#each creatorNav as item}
 					<a
 						href={item.href}
 						onclick={() => onClose()}

@@ -177,12 +177,19 @@ export async function getDueCardsByTextbook(textbookId: string, date?: string): 
 export async function getNewCards(limit: number): Promise<string[]> {
 	const uid = pb.authStore.record?.id ?? '';
 	try {
-		// Get all flashcard IDs owned by or accessible to user
-		const [ownFlashcards, scheduledCards] = await Promise.all([
+		// Collect all flashcard IDs accessible to this user:
+		// 1. Cards they own directly
+		// 2. Cards in categories/chapters they installed
+		const [ownFlashcards, installs, scheduledCards] = await Promise.all([
 			pb.collection('flashcards').getFullList({
 				requestKey: null,
 				filter: `owner = "${uid}"`,
 				fields: 'id'
+			}),
+			pb.collection('installs').getFullList({
+				requestKey: null,
+				filter: `user = "${uid}"`,
+				fields: 'contentId,contentType'
 			}),
 			pb.collection('card_schedules').getFullList({
 				requestKey: null,
@@ -190,16 +197,71 @@ export async function getNewCards(limit: number): Promise<string[]> {
 				fields: 'flashcard'
 			})
 		]);
+
 		const scheduledIds = new Set(scheduledCards.map((s) => s.flashcard as string));
-		const newIds = ownFlashcards
-			.map((c) => c.id as string)
+		const allCardIds = new Set(ownFlashcards.map((c) => c.id as string));
+
+		// Add flashcards from installed decks
+		const installedCategoryIds = installs
+			.filter((i) => i.contentType === 'flashcard_category')
+			.map((i) => i.contentId as string);
+		const installedTextbookIds = installs
+			.filter((i) => i.contentType === 'textbook')
+			.map((i) => i.contentId as string);
+
+		if (installedCategoryIds.length > 0) {
+			const catCards = await pb.collection('flashcards').getFullList({
+				requestKey: null,
+				filter: '(' + installedCategoryIds.map((id) => `category = "${id}"`).join(' || ') + ')',
+				fields: 'id'
+			});
+			catCards.forEach((c) => allCardIds.add(c.id as string));
+		}
+
+		if (installedTextbookIds.length > 0) {
+			const chapters = await pb.collection('chapters').getFullList({
+				requestKey: null,
+				filter: '(' + installedTextbookIds.map((id) => `textbook = "${id}"`).join(' || ') + ')',
+				fields: 'id'
+			});
+			if (chapters.length > 0) {
+				const chapCards = await pb.collection('flashcards').getFullList({
+					requestKey: null,
+					filter: '(' + chapters.map((c) => `chapter = "${c.id}"`).join(' || ') + ')',
+					fields: 'id'
+				});
+				chapCards.forEach((c) => allCardIds.add(c.id as string));
+			}
+		}
+
+		return [...allCardIds]
 			.filter((id) => !scheduledIds.has(id))
 			.slice(0, limit);
-		return newIds;
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
 		throw e;
 	}
+}
+
+/** Returns total count of unscheduled (never reviewed) accessible cards */
+export async function getNewCardCount(): Promise<number> {
+	const ids = await getNewCards(9999);
+	return ids.length;
+}
+
+/** Count of truly-new cards introduced today (first-ever review) */
+export async function getNewCardsIntroducedToday(): Promise<number> {
+	const uid = pb.authStore.record?.id ?? '';
+	const today = todayStr();
+	try {
+		// Cards reviewed today where the schedule was JUST created today
+		const schedules = await pb.collection('card_schedules').getFullList({
+			requestKey: null,
+			filter: `user = "${uid}" && created >= "${today}T00:00:00.000Z"`,
+			fields: 'id'
+		});
+		return schedules.length;
+	} catch { return 0; }
 }
 
 export async function getNewCardsByDeck(
@@ -340,7 +402,7 @@ export async function getReviewStats(): Promise<ReviewStats> {
 	const uid = pb.authStore.record?.id ?? '';
 	const today = todayStr();
 	try {
-		const [allDue, todayReviews, allReviews, allSchedules] = await Promise.all([
+		const [allDue, todayReviews, allReviews, allSchedules, newToday] = await Promise.all([
 			getDueCount(),
 			getTodayReviews(),
 			pb.collection('card_reviews').getFullList({
@@ -348,25 +410,28 @@ export async function getReviewStats(): Promise<ReviewStats> {
 			}),
 			pb.collection('card_schedules').getFullList({
 				requestKey: null, filter: `user = "${uid}"`, fields: 'interval,easeFactor,leitnerBox'
+			}),
+			// New cards = schedules first created today (never seen before today)
+			pb.collection('card_schedules').getFullList({
+				requestKey: null,
+				filter: `user = "${uid}" && created >= "${today}T00:00:00.000Z"`,
+				fields: 'id'
 			})
 		]);
 
 		const reviewedToday = todayReviews.length;
-		const newCardsToday = todayReviews.filter((r) => {
-			// new cards are those reviewed for the first time
-			return r.reviewedAt.startsWith(today);
-		}).length;
+		const newCardsToday = newToday.length;
 
 		const masteredCards = allSchedules.filter((s) => (s.interval as number) >= 21).length;
 
-		// Retention rate last 30 days
+		// Pass rate last 30 days (correct + partial counts as pass)
 		const thirtyDaysAgo = new Date();
 		thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 		const recentReviews = allReviews.filter((r) =>
 			new Date(r.reviewedAt as string) >= thirtyDaysAgo
 		);
 		const retentionRate = recentReviews.length > 0
-			? Math.round(recentReviews.filter((r) => r.rating === 'correct').length / recentReviews.length * 100)
+			? Math.round(recentReviews.filter((r) => r.rating === 'correct' || r.rating === 'partial').length / recentReviews.length * 100)
 			: 0;
 
 		// Average ease (SM-2 schedules only)

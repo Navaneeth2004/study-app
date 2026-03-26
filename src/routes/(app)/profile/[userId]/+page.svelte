@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import {
 		getPublicProfile, getProfileStats, getPublishedContent,
-		isFollowing, followUser, unfollowUser, getFollowerCount, getFollowingCount
+		isFollowing, followUser, unfollowUser
 	} from '$lib/profile/profileService';
 	import { getCurrentUser } from '$lib/auth/authService';
 	import { triggerFollowMilestone } from '$lib/notifications/inAppNotificationService';
@@ -15,7 +15,10 @@
 
 	let profile = $state<PublicProfile | null>(null);
 	let stats = $state<ProfileStats | null>(null);
-	let content = $state<{ textbooks: Array<{id:string;title:string;shareTitle:string;description:string;shareDescription:string}>; categories: Array<{id:string;name:string;shareTitle:string;description:string;shareDescription:string}> } | null>(null);
+	let content = $state<{
+		textbooks: Array<{ id: string; title: string; shareTitle: string; description: string; shareDescription: string }>;
+		categories: Array<{ id: string; name: string; shareTitle: string; description: string; shareDescription: string }>;
+	} | null>(null);
 	let followId = $state<string | null>(null);
 	let loading = $state(true);
 	let error = $state('');
@@ -78,7 +81,16 @@
 	</div>
 {:else if error}
 	<p class="text-sm text-[var(--color-error-400)]">{error}</p>
-{:else if !profile || !profile.isProfilePublic}
+{:else if !profile || profile.isDeleted}
+	<div class="flex flex-col items-center gap-3 py-16 text-center">
+		<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+		     stroke-width="1.3" stroke-linecap="round" class="text-[var(--color-text-muted)]">
+			<path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+			<circle cx="12" cy="7" r="4"/>
+		</svg>
+		<h2 class="text-base font-medium text-[var(--color-text-secondary)]">This account no longer exists.</h2>
+	</div>
+{:else if !profile.isProfilePublic}
 	<div class="flex flex-col items-center gap-3 py-16 text-center">
 		<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 		     stroke-width="1.3" stroke-linecap="round" class="text-[var(--color-text-muted)]">

@@ -8,6 +8,7 @@
 	import FlashcardListItem from '$lib/viewer/components/FlashcardListItem.svelte';
 	import FlashcardViewModal from '$lib/viewer/components/FlashcardViewModal.svelte';
 	import EmptyState from '$lib/shared/components/EmptyState.svelte';
+	import { getDueCountByDeck } from '$lib/review/reviewService';
 	import {
 		quizSession, currentCard, isComplete, progress, summary,
 		startQuiz, rateCard, restartWithFailed, resetQuiz
@@ -28,6 +29,7 @@
 	let viewingCard = $state<Flashcard | null>(null);
 	let loading = $state(true);
 	let error = $state('');
+	let reviewDueCount = $state(0);
 
 	const selectedCards = $derived(allCards.filter((c) => selectedIds.has(c.id)));
 	const failedCount = $derived($summary.incorrect + $summary.partial);
@@ -45,6 +47,9 @@
 			selectedIds = new Set();
 			const tb = await getTextbook(chapter.textbook);
 			textbookTitle = tb.title;
+			try {
+				reviewDueCount = await getDueCountByDeck(chapterId, 'chapter');
+			} catch { /* silent */ }
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load flashcards.';
 		} finally { loading = false; }
@@ -98,6 +103,25 @@
 				Start Test
 			</button>
 		</div>
+
+		<!-- Due review banner -->
+		{#if reviewDueCount > 0}
+			<div class="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-warning-500)]/30
+			            bg-[var(--color-warning-500)]/5 px-4 py-3">
+				<p class="text-sm text-[var(--color-text-secondary)]">
+					<span class="font-medium text-[var(--color-warning-400)]">{reviewDueCount}</span>
+					{reviewDueCount === 1 ? 'card' : 'cards'} due for review
+				</p>
+				<a
+					href="/review"
+					class="shrink-0 rounded-xl border border-[var(--color-warning-500)]/50 px-3 py-1.5 text-xs
+					       font-medium text-[var(--color-warning-400)] hover:bg-[var(--color-warning-500)]/10 transition-colors"
+				>
+					Review now
+				</a>
+			</div>
+		{/if}
+
 		<div class="flex flex-col gap-2">
 			{#each allCards as card (card.id)}
 				<FlashcardListItem flashcard={card} showCheckbox={false} onClick={(c) => (viewingCard = c)} />
@@ -132,7 +156,6 @@
 
 	{:else if screen === 'quiz'}
 		<div class="flex flex-col gap-3 w-full">
-			<!-- Header row above progress bar — no collision -->
 			<div class="flex items-center justify-between gap-4">
 				<span class="text-sm text-[var(--color-text-secondary)]">Card {$quizSession.currentIndex + 1} of {$quizSession.cards.length}</span>
 				<button onclick={handleBackToDeck} class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-error-400)] transition-colors">Quit Quiz</button>

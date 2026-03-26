@@ -23,6 +23,7 @@ export interface PublicProfile {
 	youtubeUrl: string;
 	websiteUrl: string;
 	isProfilePublic: boolean;
+	isDeleted: boolean;
 	created: string;
 }
 

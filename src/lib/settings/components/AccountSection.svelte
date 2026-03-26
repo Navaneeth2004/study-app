@@ -2,22 +2,74 @@
 	import { pb } from '$lib/shared/pocketbase';
 	import { getCurrentUser, logout } from '$lib/auth/authService';
 	import { goto } from '$app/navigation';
+
 	const user = getCurrentUser();
 	let step = $state<0 | 1 | 2>(0);
 	let confirmEmail = $state('');
 	let deleting = $state(false);
 	let deleteError = $state('');
+
 	async function handleDelete() {
-		if (confirmEmail.trim().toLowerCase() !== (user?.email ?? '').toLowerCase()) { deleteError = 'Email does not match.'; return; }
-		deleting = true; deleteError = '';
+		if (confirmEmail.trim().toLowerCase() !== (user?.email ?? '').toLowerCase()) {
+			deleteError = 'Email does not match.';
+			return;
+		}
+		deleting = true;
+		deleteError = '';
 		try {
 			const uid = user?.id as string;
-			const myFollows = await pb.collection('follows').getFullList({ requestKey: null, filter: `follower = "${uid}" || following = "${uid}"`, fields: 'id' });
-			await Promise.all(myFollows.map((f) => pb.collection('follows').delete(f.id as string, { requestKey: null })));
-			await pb.collection('users').delete(uid);
-			logout(); goto('/auth/login');
-		} catch (e) { deleteError = e instanceof Error ? e.message : 'Could not delete account.'; deleting = false; }
+
+			// 1. Anonymise all owned textbooks
+			const textbooks = await pb.collection('textbooks').getFullList({
+				requestKey: null, filter: `owner = "${uid}"`, fields: 'id'
+			});
+			await Promise.all(textbooks.map((t) =>
+				pb.collection('textbooks').update(t.id as string, { ownerName: 'Anonymous' }, { requestKey: null })
+			));
+
+			// 2. Anonymise all owned flashcard categories
+			const categories = await pb.collection('flashcard_categories').getFullList({
+				requestKey: null, filter: `owner = "${uid}"`, fields: 'id'
+			});
+			await Promise.all(categories.map((c) =>
+				pb.collection('flashcard_categories').update(c.id as string, { ownerName: 'Anonymous' }, { requestKey: null })
+			));
+
+			// 3. Anonymise all comments
+			const comments = await pb.collection('content_comments').getFullList({
+				requestKey: null, filter: `user = "${uid}"`, fields: 'id'
+			});
+			await Promise.all(comments.map((c) =>
+				pb.collection('content_comments').update(c.id as string, { userName: 'Anonymous' }, { requestKey: null })
+			));
+
+			// 4. Remove follows
+			const follows = await pb.collection('follows').getFullList({
+				requestKey: null,
+				filter: `follower = "${uid}" || following = "${uid}"`,
+				fields: 'id'
+			});
+			await Promise.all(follows.map((f) =>
+				pb.collection('follows').delete(f.id as string, { requestKey: null })
+			));
+
+			// 5. Soft-delete user — set isDeleted, isProfilePublic=false
+			await pb.collection('users').update(uid, {
+				isDeleted: true,
+				isProfilePublic: false
+			});
+
+			// 6. Clear all localStorage including AI keys
+			localStorage.clear();
+
+			logout();
+			goto('/auth/login');
+		} catch (e) {
+			deleteError = e instanceof Error ? e.message : 'Could not delete account.';
+			deleting = false;
+		}
 	}
+
 	function reset() { step = 0; confirmEmail = ''; deleteError = ''; }
 </script>
 

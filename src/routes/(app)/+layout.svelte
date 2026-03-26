@@ -4,6 +4,7 @@
 	import TopBar from '$lib/shared/components/TopBar.svelte';
 	import NotificationPermissionBanner from '$lib/shared/components/NotificationPermissionBanner.svelte';
 	import { startPolling, stopPolling } from '$lib/notifications/notificationPoller';
+	import { startReviewPolling, stopReviewPolling } from '$lib/review/reviewDueCountStore';
 
 	interface Props {
 		children: import('svelte').Snippet;
@@ -17,7 +18,11 @@
 
 	onMount(() => {
 		startPolling();
-		return () => stopPolling();
+		startReviewPolling();
+		return () => {
+			stopPolling();
+			stopReviewPolling();
+		};
 	});
 </script>
 

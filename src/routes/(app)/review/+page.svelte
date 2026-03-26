@@ -6,17 +6,17 @@
 		getReviewSettings, updateReviewSettings, getDueCount,
 		getReviewStats, getAllDecksWithDueCount, getTodayReviews,
 		getDueCards, getDueCardsByDeck, getNewCards, getNewCardsByDeck,
-		getSchedule
+		getNewCardCount, getNewCardsIntroducedToday, getSchedule
 	} from '$lib/review/reviewService';
 	import {
 		reviewSession, currentCard, reviewProgress, reviewSummary,
-		startSession, flipCurrent, rateCard, endSession, resetSession
+		startSession, rateCard, endSession, resetSession
 	} from '$lib/review/reviewSessionStore';
-	import { getNextReviewPreview, getAlgorithmLabel, getNextReviewLabel } from '$lib/review/reviewUtils';
-	import type { ReviewSettings, ReviewStats, DeckReviewSummary, ReviewAlgorithm } from '$lib/review/reviewTypes';
+	import type { SessionMode } from '$lib/review/reviewSessionStore';
+	import { getNextReviewPreview } from '$lib/review/reviewUtils';
+	import type { ReviewSettings, ReviewStats, DeckReviewSummary } from '$lib/review/reviewTypes';
 	import type { Flashcard } from '$lib/creator/flashcardTypes';
 	import { pb } from '$lib/shared/pocketbase';
-	import FlipCard from '$lib/shared/components/FlipCard.svelte';
 
 	const user = getCurrentUser();
 
@@ -31,7 +31,11 @@
 	let sessionActive = $state(false);
 	let sessionLoading = $state(false);
 	let rating = $state(false);
+	let cardFlipped = $state(false);
 	let expandedTextbooks = $state<Set<string>>(new Set());
+	let todayReviews = $state<Array<{ rating: string }>>([]);
+	let totalNewAvailable = $state(0);
+	let newIntroducedToday = $state(0);
 
 	// Per-day bar chart data
 	let weeklyData = $state<Array<{ date: string; correct: number; partial: number; incorrect: number }>>([]);
@@ -59,14 +63,20 @@
 	onMount(async () => {
 		loading = true;
 		try {
-			const [s, st, ds] = await Promise.all([
+			const [s, st, ds, tr, nnc, nit] = await Promise.all([
 				getReviewSettings(),
 				getReviewStats(),
-				getAllDecksWithDueCount()
+				getAllDecksWithDueCount(),
+				getTodayReviews(),
+				getNewCardCount(),
+				getNewCardsIntroducedToday()
 			]);
 			settings = s;
 			stats = st;
 			deckSummary = ds;
+			todayReviews = tr;
+			totalNewAvailable = nnc;
+			newIntroducedToday = nit;
 			await loadWeeklyData();
 			if (s.defaultAlgorithm === 'leitner') await loadLeitnerBoxCounts();
 		} catch (e) {
@@ -115,38 +125,30 @@
 		} catch { /* silent */ }
 	}
 
-	async function handleAlgorithmChange(algo: ReviewAlgorithm) {
-		if (!settings) return;
-		settings = { ...settings, defaultAlgorithm: algo };
-		try {
-			await updateReviewSettings({ defaultAlgorithm: algo });
-		} catch { /* silent */ }
-	}
-
 	async function startAllDue() {
-		if (!settings) return;
 		sessionLoading = true;
 		try {
 			const dueSchedules = await getDueCards();
 			if (dueSchedules.length === 0) return;
 			const cardIds = dueSchedules.map((s) => s.flashcard);
 			const cards = await fetchFlashcardsByIds(cardIds);
-			startSession(cards, settings.defaultAlgorithm);
+			startSession(cards, 'review');
 			sessionActive = true;
+			cardFlipped = false;
 		} catch (e) { error = e instanceof Error ? e.message : 'Could not start session.'; }
 		finally { sessionLoading = false; }
 	}
 
 	async function startDeckReview(deckId: string, deckType: 'chapter' | 'category') {
-		if (!settings) return;
 		sessionLoading = true;
 		try {
 			const dueSchedules = await getDueCardsByDeck(deckId, deckType);
 			if (dueSchedules.length === 0) return;
 			const cardIds = dueSchedules.map((s) => s.flashcard);
 			const cards = await fetchFlashcardsByIds(cardIds);
-			startSession(cards, settings.defaultAlgorithm);
+			startSession(cards, 'review');
 			sessionActive = true;
+			cardFlipped = false;
 		} catch (e) { error = e instanceof Error ? e.message : 'Could not start session.'; }
 		finally { sessionLoading = false; }
 	}
@@ -155,15 +157,14 @@
 		if (!settings) return;
 		sessionLoading = true;
 		try {
-			const todayReviews = await getTodayReviews();
-			const newToday = todayReviews.length;
-			const remaining = settings.dailyNewCardLimit - newToday;
+			const remaining = Math.max(0, settings.dailyNewCardLimit - (stats?.newCardsToday ?? 0));
 			if (remaining <= 0) return;
 			const newCardIds = await getNewCards(remaining);
-			if (newCardIds.length === 0) return;
+			if (newCardIds.length === 0) { error = 'No new cards available. All your cards are already scheduled.'; return; }
 			const cards = await fetchFlashcardsByIds(newCardIds);
-			startSession(cards, settings.defaultAlgorithm);
+			startSession(cards, 'review');
 			sessionActive = true;
+			cardFlipped = false;
 		} catch (e) { error = e instanceof Error ? e.message : 'Could not start new cards.'; }
 		finally { sessionLoading = false; }
 	}
@@ -175,9 +176,39 @@
 			const newCardIds = await getNewCardsByDeck(deckId, deckType, settings.dailyNewCardLimit);
 			if (newCardIds.length === 0) return;
 			const cards = await fetchFlashcardsByIds(newCardIds);
-			startSession(cards, settings.defaultAlgorithm);
+			startSession(cards, 'review');
 			sessionActive = true;
+			cardFlipped = false;
 		} catch (e) { error = e instanceof Error ? e.message : 'Could not start session.'; }
+		finally { sessionLoading = false; }
+	}
+
+	async function startPracticeAll() {
+		sessionLoading = true;
+		try {
+			// Practice uses due cards — or all scheduled cards if you want everything
+			const dueSchedules = await getDueCards();
+			if (dueSchedules.length === 0) { error = 'No due cards to practice right now.'; return; }
+			const cardIds = dueSchedules.map((s) => s.flashcard);
+			const cards = await fetchFlashcardsByIds(cardIds);
+			startSession(cards, 'practice');
+			sessionActive = true;
+			cardFlipped = false;
+		} catch (e) { error = e instanceof Error ? e.message : 'Could not start practice.'; }
+		finally { sessionLoading = false; }
+	}
+
+	async function startPracticeDeck(deckId: string, deckType: 'chapter' | 'category') {
+		sessionLoading = true;
+		try {
+			const dueSchedules = await getDueCardsByDeck(deckId, deckType);
+			if (dueSchedules.length === 0) { error = 'No due cards in this deck.'; return; }
+			const cardIds = dueSchedules.map((s) => s.flashcard);
+			const cards = await fetchFlashcardsByIds(cardIds);
+			startSession(cards, 'practice');
+			sessionActive = true;
+			cardFlipped = false;
+		} catch (e) { error = e instanceof Error ? e.message : 'Could not start practice.'; }
 		finally { sessionLoading = false; }
 	}
 
@@ -208,6 +239,7 @@
 		rating = true;
 		try {
 			await rateCard(r);
+			cardFlipped = false;
 		} finally { rating = false; }
 	}
 
@@ -218,17 +250,23 @@
 	async function handleBackToReview() {
 		resetSession();
 		sessionActive = false;
-		// Refresh stats
 		loading = true;
 		try {
-			const [s, st, ds] = await Promise.all([
+			const [s, st, ds, tr, nnc, nit] = await Promise.all([
 				getReviewSettings(),
 				getReviewStats(),
-				getAllDecksWithDueCount()
+				getAllDecksWithDueCount(),
+				getTodayReviews(),
+				getNewCardCount(),
+				getNewCardsIntroducedToday()
 			]);
 			settings = s;
 			stats = st;
 			deckSummary = ds;
+			todayReviews = tr;
+			totalNewAvailable = nnc;
+			newIntroducedToday = nit;
+			await loadWeeklyData();
 		} catch { /* silent */ } finally { loading = false; }
 	}
 
@@ -249,6 +287,16 @@
 		weeklyData.reduce((max, d) => Math.max(max, d.correct + d.partial + d.incorrect), 1)
 	);
 
+	// Today's review breakdown
+	const todayCorrect = $derived(todayReviews.filter((r) => r.rating === 'correct').length);
+	const todayPartial = $derived(todayReviews.filter((r) => r.rating === 'partial').length);
+	const todayIncorrect = $derived(todayReviews.filter((r) => r.rating === 'incorrect').length);
+	const todayTotal = $derived(todayReviews.length);
+	const todayPassRate = $derived(todayTotal > 0 ? Math.round(((todayCorrect + todayPartial) / todayTotal) * 100) : 0);
+
+	// Chart Y-axis labels (0, half, max)
+	const chartYLabels = $derived([maxBarHeight, Math.round(maxBarHeight / 2), 0]);
+
 	const BOX_INTERVALS_LABELS = ['Daily', 'Every 3 days', 'Weekly', 'Every 2 weeks', 'Monthly'];
 	const BOX_COLORS = [
 		'var(--color-error-500)',
@@ -268,10 +316,26 @@
 	<div class="flex flex-col gap-4">
 		<div class="flex items-center justify-between gap-4">
 			<div class="flex flex-col gap-0.5">
-				<h1 class="font-display text-2xl text-[var(--color-text-primary)]">Review Session</h1>
-				<span class="text-sm text-[var(--color-text-secondary)]">
-					Card {$reviewSession.currentIndex + 1} of {$reviewSession.cards.length}
-				</span>
+				<div class="flex items-center gap-2">
+					<h1 class="font-display text-2xl text-[var(--color-text-primary)]">
+						{$reviewSession.mode === 'practice' ? 'Practice' : 'Review'}
+					</h1>
+					{#if $reviewSession.mode === 'practice'}
+						<span class="rounded-full px-2 py-0.5 text-xs font-medium"
+						      style="background: color-mix(in srgb, var(--color-warning-500) 15%, transparent); color: var(--color-warning-400);">
+							Practice
+						</span>
+					{/if}
+				</div>
+				{#if $reviewSession.mode === 'practice'}
+					<span class="text-sm text-[var(--color-text-secondary)]">
+						{$reviewSession.queue.length} card{$reviewSession.queue.length !== 1 ? 's' : ''} remaining · wrong cards repeat
+					</span>
+				{:else}
+					<span class="text-sm text-[var(--color-text-secondary)]">
+						Card {$reviewSession.currentIndex + 1} of {$reviewSession.cards.length}
+					</span>
+				{/if}
 			</div>
 			<button
 				onclick={handleEndSession}
@@ -289,26 +353,60 @@
 		</div>
 
 		{#if $currentCard}
-			<FlipCard
-				frontText={$currentCard.frontText}
-				frontImageUrl={$currentCard.frontImageUrl}
-				frontAudioUrl={$currentCard.frontAudioUrl}
-				backText={$currentCard.backText}
-				backImageUrl={$currentCard.backImageUrl}
-				backAudioUrl={$currentCard.backAudioUrl}
-			/>
+			<!-- Inline flip card — local state drives the reveal -->
+			<div style="perspective: 1000px; height: 260px; width: 100%;">
+				<button
+					onclick={() => (cardFlipped = true)}
+					class="relative w-full h-full cursor-pointer"
+					aria-label="Flip card"
+					style="transform-style: preserve-3d; transition: transform 0.5s; transform: {cardFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)'}"
+				>
+					<!-- Front -->
+					<div class="absolute inset-0 flex flex-col rounded-xl border border-[var(--color-surface-700)]
+					            bg-[var(--color-surface-800)] p-5 overflow-hidden"
+					     style="backface-visibility: hidden; -webkit-backface-visibility: hidden;">
+						<span class="shrink-0 text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">Front</span>
+						<div class="flex-1 flex flex-col items-center justify-center gap-3 min-h-0">
+							<p class="text-sm text-center text-[var(--color-text-primary)] leading-relaxed line-clamp-4">{$currentCard.frontText}</p>
+							{#if $currentCard.frontImageUrl}
+								<img src={$currentCard.frontImageUrl} alt="Front"
+								     class="rounded-lg border border-[var(--color-surface-700)] max-h-24 object-contain" />
+							{/if}
+						</div>
+						<p class="shrink-0 text-center text-xs text-[var(--color-text-muted)] mt-2">Click to flip</p>
+					</div>
+					<!-- Back -->
+					<div class="absolute inset-0 flex flex-col rounded-xl border border-[var(--color-accent-500)]/30
+					            bg-[var(--color-surface-800)] p-5 overflow-hidden"
+					     style="backface-visibility: hidden; -webkit-backface-visibility: hidden; transform: rotateY(180deg);">
+						<span class="shrink-0 text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">Back</span>
+						<div class="flex-1 flex flex-col items-center justify-center gap-3 min-h-0">
+							<p class="text-sm text-center text-[var(--color-text-primary)] leading-relaxed line-clamp-4">{$currentCard.backText}</p>
+							{#if $currentCard.backImageUrl}
+								<img src={$currentCard.backImageUrl} alt="Back"
+								     class="rounded-lg border border-[var(--color-surface-700)] max-h-24 object-contain" />
+							{/if}
+						</div>
+					</div>
+				</button>
+			</div>
 
-			{#if !$reviewSession.flipped}
-				<!-- Show flip instruction -->
+			{#if !cardFlipped}
 				<p class="text-center text-sm text-[var(--color-text-muted)]">Click the card to reveal the answer</p>
 			{:else}
-				<!-- Next review previews -->
-				{#if currentPreview}
+				<!-- Next review previews — only for review mode -->
+				{#if currentPreview && $reviewSession.mode === 'review'}
 					<div class="flex items-center justify-center gap-4 rounded-xl border border-[var(--color-surface-700)]
 					            bg-[var(--color-surface-900)] px-4 py-2.5 text-xs text-[var(--color-text-muted)]">
 						<span class="text-[var(--color-success-500)]">✓ {currentPreview.correct}</span>
 						<span class="text-[var(--color-warning-400)]">~ {currentPreview.partial}</span>
 						<span class="text-[var(--color-error-400)]">✗ {currentPreview.incorrect}</span>
+					</div>
+				{/if}
+				{#if $reviewSession.mode === 'practice'}
+					<div class="flex items-center justify-center gap-2 rounded-xl border border-[var(--color-warning-500)]/20
+					            bg-[var(--color-warning-500)]/5 px-4 py-2 text-xs text-[var(--color-warning-400)]">
+						<span>✗ / ~ → card repeats · ✓ → removed from queue</span>
 					</div>
 				{/if}
 
@@ -352,8 +450,16 @@
 	            bg-[var(--color-surface-900)] p-8 max-w-xl">
 		<div class="flex flex-col items-center gap-2 text-center">
 			<span class="text-3xl">🎉</span>
-			<h2 class="font-display text-2xl text-[var(--color-text-primary)]">Session Complete!</h2>
-			<p class="text-sm text-[var(--color-text-secondary)]">{$reviewSummary.total} cards reviewed</p>
+			<h2 class="font-display text-2xl text-[var(--color-text-primary)]">
+				{$reviewSession.mode === 'practice' ? 'Practice Complete!' : 'Session Complete!'}
+			</h2>
+			{#if $reviewSession.mode === 'practice'}
+				<p class="text-sm text-[var(--color-text-secondary)]">
+					You got all {$reviewSummary.masteredCount} card{$reviewSummary.masteredCount !== 1 ? 's' : ''} correct — {$reviewSummary.total} total answers
+				</p>
+			{:else}
+				<p class="text-sm text-[var(--color-text-secondary)]">{$reviewSummary.total} cards reviewed</p>
+			{/if}
 		</div>
 
 		<!-- Results bar -->
@@ -389,18 +495,26 @@
 			</div>
 		</div>
 
-		<div class="grid grid-cols-2 gap-3 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-800)] px-4 py-3 text-sm">
-			<div class="flex flex-col gap-0.5">
-				<span class="text-xs text-[var(--color-text-muted)]">Retention</span>
-				<span class="font-semibold text-[var(--color-text-primary)]">{$reviewSummary.retention}%</span>
+		{#if $reviewSession.mode === 'review'}
+			<div class="grid grid-cols-2 gap-3 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-800)] px-4 py-3 text-sm">
+				<div class="flex flex-col gap-0.5">
+					<span class="text-xs text-[var(--color-text-muted)]">Pass rate</span>
+					<span class="font-semibold text-[var(--color-text-primary)]">{$reviewSummary.retention}%</span>
+				</div>
+				<div class="flex flex-col gap-0.5">
+					<span class="text-xs text-[var(--color-text-muted)]">Avg next review</span>
+					<span class="font-semibold text-[var(--color-text-primary)]">
+						{$reviewSummary.avgInterval > 0 ? `${$reviewSummary.avgInterval} days` : '—'}
+					</span>
+				</div>
 			</div>
-			<div class="flex flex-col gap-0.5">
-				<span class="text-xs text-[var(--color-text-muted)]">Avg interval</span>
-				<span class="font-semibold text-[var(--color-text-primary)]">
-					{$reviewSummary.avgInterval > 0 ? `${$reviewSummary.avgInterval} days` : '—'}
-				</span>
+		{:else}
+			<div class="rounded-xl border border-[var(--color-warning-500)]/20 bg-[var(--color-warning-500)]/5 px-4 py-3">
+				<p class="text-xs text-[var(--color-warning-400)]">
+					Practice mode: only cards you answered <strong>Correct</strong> were scheduled in SM-2. Wrong cards are not penalised.
+				</p>
 			</div>
-		</div>
+		{/if}
 
 		<button
 			onclick={handleBackToReview}
@@ -471,44 +585,42 @@
 			</div>
 		</div>
 
-		<!-- Algorithm selector -->
-		<div class="flex flex-col gap-1.5">
-			<span class="text-xs font-medium text-[var(--color-text-secondary)]">Algorithm</span>
-			<div class="flex gap-2">
-				{#each (['sm2', 'simple', 'leitner'] as ReviewAlgorithm[]) as algo}
-					<button
-						onclick={() => handleAlgorithmChange(algo)}
-						class="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors
-						       {settings.defaultAlgorithm === algo
-							? 'border-[var(--color-accent-500)] bg-[var(--color-accent-500)]/10 text-[var(--color-accent-400)]'
-							: 'border-[var(--color-surface-600)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}"
-					>
-						{getAlgorithmLabel(algo)}
-					</button>
-				{/each}
-			</div>
-		</div>
-
 		<!-- Review queue -->
 		{#if stats.dueToday > 0}
 			<div class="flex flex-col gap-3">
-				<button
-					onclick={startAllDue}
-					disabled={sessionLoading}
-					class="flex items-center justify-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-3
-					       text-sm font-medium text-white hover:bg-[var(--color-accent-400)]
-					       disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-				>
-					{sessionLoading ? 'Loading…' : `Start Review (${stats.dueToday} cards)`}
-				</button>
+				<div class="flex gap-2">
+					<button
+						onclick={startAllDue}
+						disabled={sessionLoading}
+						class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-3
+						       text-sm font-medium text-white hover:bg-[var(--color-accent-400)]
+						       disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+					>
+						{sessionLoading ? 'Loading…' : `Review (${stats.dueToday})`}
+					</button>
+					<button
+						onclick={startPracticeAll}
+						disabled={sessionLoading}
+						title="Wrong cards repeat until correct"
+						class="flex items-center justify-center gap-2 rounded-xl border border-[var(--color-warning-500)]/50
+						       bg-[var(--color-warning-500)]/10 px-4 py-3 text-sm font-medium
+						       text-[var(--color-warning-400)] hover:bg-[var(--color-warning-500)]/20
+						       disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+					>
+						🔄 Practice
+					</button>
+				</div>
+				<p class="text-xs text-[var(--color-text-muted)] px-1">
+					<strong class="text-[var(--color-text-secondary)]">Review</strong> schedules cards with SM-2 (wrong → tomorrow) ·
+					<strong class="text-[var(--color-text-secondary)]">Practice</strong> keeps wrong cards in the queue until correct
+				</p>
 
 				{#if deckSummary}
 					<!-- Textbooks section -->
-					{@const tbsWithDue = deckSummary.textbooks.filter((tb) => tb.chapters.some((ch) => ch.dueCount > 0))}
-					{#if tbsWithDue.length > 0}
+					{#if deckSummary.textbooks.some((tb) => tb.chapters.some((ch) => ch.dueCount > 0))}
 						<div class="flex flex-col gap-1">
 							<span class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)] px-1">Textbooks</span>
-							{#each tbsWithDue as tb}
+							{#each deckSummary.textbooks.filter((tb) => tb.chapters.some((ch) => ch.dueCount > 0)) as tb}
 								{#each tb.chapters.filter((ch) => ch.dueCount > 0) as ch}
 									<div class="flex items-center gap-3 rounded-xl border border-[var(--color-surface-700)]
 									            bg-[var(--color-surface-900)] px-4 py-3">
@@ -529,6 +641,15 @@
 										>
 											Review
 										</button>
+										<button
+											onclick={() => startPracticeDeck(ch.chapterId, 'chapter')}
+											disabled={sessionLoading}
+											class="shrink-0 rounded-lg border border-[var(--color-warning-500)]/40 px-3 py-1.5 text-xs
+											       text-[var(--color-warning-400)] hover:bg-[var(--color-warning-500)]/10
+											       disabled:opacity-50 transition-colors"
+										>
+											Practice
+										</button>
 									</div>
 								{/each}
 							{/each}
@@ -536,11 +657,10 @@
 					{/if}
 
 					<!-- Solo decks section -->
-					{@const soloWithDue = deckSummary.soloDecks.filter((d) => d.dueCount > 0)}
-					{#if soloWithDue.length > 0}
+					{#if deckSummary.soloDecks.some((d) => d.dueCount > 0)}
 						<div class="flex flex-col gap-1">
 							<span class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)] px-1">Solo Decks</span>
-							{#each soloWithDue as deck}
+							{#each deckSummary.soloDecks.filter((d) => d.dueCount > 0) as deck}
 								<div class="flex items-center gap-3 rounded-xl border border-[var(--color-surface-700)]
 								            bg-[var(--color-surface-900)] px-4 py-3">
 									<div class="flex-1 min-w-0">
@@ -559,6 +679,15 @@
 									>
 										Review
 									</button>
+									<button
+										onclick={() => startPracticeDeck(deck.categoryId, 'category')}
+										disabled={sessionLoading}
+										class="shrink-0 rounded-lg border border-[var(--color-warning-500)]/40 px-3 py-1.5 text-xs
+										       text-[var(--color-warning-400)] hover:bg-[var(--color-warning-500)]/10
+										       disabled:opacity-50 transition-colors"
+									>
+										Practice
+									</button>
 								</div>
 							{/each}
 						</div>
@@ -566,11 +695,40 @@
 				{/if}
 			</div>
 		{:else}
-			<div class="flex flex-col items-center gap-3 rounded-xl border border-dashed
-			            border-[var(--color-surface-600)] py-12 text-center">
-				<span class="text-2xl">✅</span>
-				<p class="text-sm font-medium text-[var(--color-text-secondary)]">All caught up! Nothing due today.</p>
-			</div>
+			<!-- Nothing due — show what was completed today if anything -->
+			{#if todayTotal > 0}
+				<div class="flex flex-col gap-3 rounded-xl border border-[var(--color-success-500)]/30
+				            bg-[var(--color-success-500)]/5 p-4">
+					<div class="flex items-center gap-2">
+						<span class="text-xl">✅</span>
+						<p class="text-sm font-medium text-[var(--color-success-500)]">All caught up! Nothing due right now.</p>
+					</div>
+					<p class="text-xs text-[var(--color-text-muted)]">
+						Cards you reviewed today were rescheduled for a future date based on your answers. Come back tomorrow!
+					</p>
+					<div class="grid grid-cols-3 gap-2 pt-1">
+						<div class="flex flex-col items-center gap-0.5 rounded-lg bg-[var(--color-surface-800)] py-2">
+							<span class="text-base font-semibold text-[var(--color-success-500)]">{todayCorrect}</span>
+							<span class="text-[10px] text-[var(--color-text-muted)]">Correct</span>
+						</div>
+						<div class="flex flex-col items-center gap-0.5 rounded-lg bg-[var(--color-surface-800)] py-2">
+							<span class="text-base font-semibold text-[var(--color-warning-400)]">{todayPartial}</span>
+							<span class="text-[10px] text-[var(--color-text-muted)]">Partial</span>
+						</div>
+						<div class="flex flex-col items-center gap-0.5 rounded-lg bg-[var(--color-surface-800)] py-2">
+							<span class="text-base font-semibold text-[var(--color-error-400)]">{todayIncorrect}</span>
+							<span class="text-[10px] text-[var(--color-text-muted)]">Incorrect</span>
+						</div>
+					</div>
+				</div>
+			{:else}
+				<div class="flex flex-col items-center gap-3 rounded-xl border border-dashed
+				            border-[var(--color-surface-600)] py-12 text-center">
+					<span class="text-2xl">✅</span>
+					<p class="text-sm font-medium text-[var(--color-text-secondary)]">All caught up! Nothing due today.</p>
+					<p class="text-xs text-[var(--color-text-muted)]">Start reviewing new cards below to build your queue.</p>
+				</div>
+			{/if}
 		{/if}
 
 		<!-- New cards -->
@@ -579,7 +737,11 @@
 			<div class="flex flex-col gap-0.5">
 				<span class="text-sm font-medium text-[var(--color-text-primary)]">Introduce New Cards</span>
 				<span class="text-xs text-[var(--color-text-muted)]">
-					{settings.dailyNewCardLimit - stats.newCardsToday} remaining today
+					{#if stats.newCardsToday >= settings.dailyNewCardLimit}
+						Daily limit reached ({settings.dailyNewCardLimit} new cards)
+					{:else}
+						{settings.dailyNewCardLimit - stats.newCardsToday} remaining today
+					{/if}
 				</span>
 			</div>
 			<button
@@ -617,10 +779,11 @@
 								</svg>
 								<span class="text-sm font-medium text-[var(--color-text-primary)] truncate">{tb.textbookTitle}</span>
 							</div>
-							{@const tbDue = tb.chapters.reduce((s, ch) => s + ch.dueCount, 0)}
-							{#if tbDue > 0}
+							{#if tb.chapters.reduce((s, ch) => s + ch.dueCount, 0) > 0}
 								<span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold
-								             bg-[var(--color-error-500)]/15 text-[var(--color-error-400)]">{tbDue}</span>
+								             bg-[var(--color-error-500)]/15 text-[var(--color-error-400)]">
+									{tb.chapters.reduce((s, ch) => s + ch.dueCount, 0)}
+								</span>
 							{/if}
 							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 							     stroke-width="2" stroke-linecap="round" class="shrink-0 text-[var(--color-text-muted)]">
@@ -744,86 +907,147 @@
 
 	{:else if activeTab === 'stats' && stats && settings}
 	<!-- ── STATS TAB ───────────────────────────────────────────────────── -->
-	<div class="flex flex-col gap-6">
-		<!-- Stat grid -->
+	<div class="flex flex-col gap-5">
+
+		<!-- Main stat grid -->
 		<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
 			<div class="flex flex-col gap-1 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] px-4 py-3">
 				<span class="text-xs text-[var(--color-text-muted)]">Streak 🔥</span>
 				<span class="text-2xl font-semibold text-[var(--color-text-primary)]">{stats.streak}</span>
+				<span class="text-xs text-[var(--color-text-muted)]">{stats.streak === 1 ? 'day' : 'days'} in a row</span>
 			</div>
 			<div class="flex flex-col gap-1 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] px-4 py-3">
 				<span class="text-xs text-[var(--color-text-muted)]">Total Reviewed</span>
 				<span class="text-2xl font-semibold text-[var(--color-text-primary)]">{stats.totalReviewed}</span>
+				<span class="text-xs text-[var(--color-text-muted)]">all time</span>
 			</div>
 			<div class="flex flex-col gap-1 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] px-4 py-3">
 				<span class="text-xs text-[var(--color-text-muted)]">Mastered 🏆</span>
 				<span class="text-2xl font-semibold text-[var(--color-text-primary)]">{stats.masteredCards}</span>
+				<span class="text-xs text-[var(--color-text-muted)]">≥21 day interval</span>
 			</div>
 			<div class="flex flex-col gap-1 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] px-4 py-3">
-				<span class="text-xs text-[var(--color-text-muted)]">Retention (30d)</span>
+				<span class="text-xs text-[var(--color-text-muted)]">Pass Rate (30d)</span>
 				<span class="text-2xl font-semibold text-[var(--color-text-primary)]">{stats.retentionRate}%</span>
+				<span class="text-xs text-[var(--color-text-muted)]">correct answers</span>
 			</div>
 		</div>
 
-		{#if settings.defaultAlgorithm === 'sm2' && stats.averageEase !== undefined}
-			<div class="flex flex-col gap-1 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] px-4 py-3">
-				<span class="text-xs text-[var(--color-text-muted)]">Average Ease Factor (SM-2)</span>
-				<span class="text-xl font-semibold text-[var(--color-text-primary)]">{stats.averageEase}</span>
+		<!-- Today's session summary (if any reviews done today) -->
+		{#if todayTotal > 0}
+			<div class="flex flex-col gap-3 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] p-4">
+				<span class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">Today's Session</span>
+				<div class="flex items-center gap-4">
+					<div class="flex-1 flex flex-col gap-1">
+						<div class="flex h-2 w-full overflow-hidden rounded-full bg-[var(--color-surface-700)]">
+							{#if todayCorrect > 0}<div class="bg-[var(--color-success-500)]" style="width:{(todayCorrect/todayTotal)*100}%"></div>{/if}
+							{#if todayPartial > 0}<div class="bg-[var(--color-warning-400)]" style="width:{(todayPartial/todayTotal)*100}%"></div>{/if}
+							{#if todayIncorrect > 0}<div class="bg-[var(--color-error-500)]" style="width:{(todayIncorrect/todayTotal)*100}%"></div>{/if}
+						</div>
+						<div class="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+							<span>{todayTotal} cards reviewed</span>
+							<span class="font-medium text-[var(--color-text-secondary)]">{todayPassRate}% pass rate</span>
+						</div>
+					</div>
+				</div>
+				<div class="grid grid-cols-3 gap-2">
+					<div class="flex items-center gap-1.5 rounded-lg bg-[var(--color-success-500)]/10 px-3 py-2">
+						<span class="text-sm font-bold text-[var(--color-success-500)]">{todayCorrect}</span>
+						<span class="text-xs text-[var(--color-text-muted)]">Correct</span>
+					</div>
+					<div class="flex items-center gap-1.5 rounded-lg bg-[var(--color-warning-400)]/10 px-3 py-2">
+						<span class="text-sm font-bold text-[var(--color-warning-400)]">{todayPartial}</span>
+						<span class="text-xs text-[var(--color-text-muted)]">Partial</span>
+					</div>
+					<div class="flex items-center gap-1.5 rounded-lg bg-[var(--color-error-500)]/10 px-3 py-2">
+						<span class="text-sm font-bold text-[var(--color-error-400)]">{todayIncorrect}</span>
+						<span class="text-xs text-[var(--color-text-muted)]">Incorrect</span>
+					</div>
+				</div>
 			</div>
 		{/if}
 
-		<!-- Weekly bar chart -->
+		<!-- SM-2 ease factor -->
+		{#if settings.defaultAlgorithm === 'sm2' && stats.averageEase !== undefined}
+			<div class="flex items-center justify-between rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] px-4 py-3">
+				<div class="flex flex-col gap-0.5">
+					<span class="text-xs text-[var(--color-text-muted)]">Average Ease Factor</span>
+					<span class="text-xs text-[var(--color-text-muted)]">Higher = easier cards (max 2.5)</span>
+				</div>
+				<span class="text-2xl font-semibold text-[var(--color-text-primary)]">{stats.averageEase}</span>
+			</div>
+		{/if}
+
+		<!-- Weekly bar chart — fixed with Y-axis and totals -->
 		<div class="flex flex-col gap-3 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] p-4">
 			<span class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">Last 7 Days</span>
-			<div class="flex items-end gap-2 h-28">
-				{#each weeklyData as day}
-					{@const total = day.correct + day.partial + day.incorrect}
-					{@const h = total === 0 ? 2 : Math.max(4, (total / maxBarHeight) * 100)}
-					<div class="flex flex-1 flex-col items-center gap-1.5 group relative">
-						<div class="w-full flex flex-col justify-end rounded-t overflow-hidden" style="height:88px;">
-							<div class="flex flex-col-reverse w-full" style="height:{h}%;">
-								{#if day.incorrect > 0}
-									<div class="w-full" style="height:{(day.incorrect/Math.max(1,total))*100}%; min-height:2px; background:var(--color-error-500);"></div>
-								{/if}
-								{#if day.partial > 0}
-									<div class="w-full" style="height:{(day.partial/Math.max(1,total))*100}%; min-height:2px; background:var(--color-warning-400);"></div>
-								{/if}
-								{#if day.correct > 0}
-									<div class="w-full" style="height:{(day.correct/Math.max(1,total))*100}%; min-height:2px; background:var(--color-success-500);"></div>
-								{/if}
-								{#if total === 0}
-									<div class="w-full" style="height:100%; background:var(--color-surface-700);"></div>
+			<div class="flex gap-2">
+				<!-- Y-axis labels -->
+				<div class="flex flex-col justify-between text-right pb-5" style="min-width:24px;">
+					{#each chartYLabels as label}
+						<span class="text-[10px] text-[var(--color-text-muted)] leading-none">{label}</span>
+					{/each}
+				</div>
+				<!-- Bars -->
+				<div class="flex flex-1 items-end gap-1.5" style="height:100px;">
+					{#each weeklyData as day}
+						{@const total = day.correct + day.partial + day.incorrect}
+						{@const barH = total === 0 ? 0 : Math.max(4, Math.round((total / maxBarHeight) * 100))}
+						<div class="group relative flex flex-1 flex-col items-center gap-1">
+							<!-- Tooltip -->
+							{#if total > 0}
+								<div class="pointer-events-none absolute bottom-full mb-1 left-1/2 -translate-x-1/2
+								            hidden group-hover:flex flex-col items-center z-10">
+									<div class="rounded-lg border border-[var(--color-surface-600)]
+									            bg-[var(--color-surface-800)] px-2.5 py-1.5 text-[10px]
+									            text-[var(--color-text-secondary)] whitespace-nowrap shadow-lg">
+										<div class="font-semibold text-[var(--color-text-primary)]">{total} total</div>
+										{#if day.correct > 0}<div class="text-[var(--color-success-500)]">✓ {day.correct}</div>{/if}
+										{#if day.partial > 0}<div class="text-[var(--color-warning-400)]">~ {day.partial}</div>{/if}
+										{#if day.incorrect > 0}<div class="text-[var(--color-error-400)]">✗ {day.incorrect}</div>{/if}
+									</div>
+								</div>
+							{/if}
+							<!-- Stacked bar -->
+							<div class="w-full flex flex-col-reverse rounded-sm overflow-hidden"
+							     style="height:{barH}%; min-height:{total > 0 ? 4 : 0}px; background: var(--color-surface-700);">
+								{#if total > 0}
+									{#if day.correct > 0}
+										<div style="height:{(day.correct/total)*100}%; background:var(--color-success-500);"></div>
+									{/if}
+									{#if day.partial > 0}
+										<div style="height:{(day.partial/total)*100}%; background:var(--color-warning-400);"></div>
+									{/if}
+									{#if day.incorrect > 0}
+										<div style="height:{(day.incorrect/total)*100}%; background:var(--color-error-500);"></div>
+									{/if}
 								{/if}
 							</div>
+							<!-- Count above bar -->
+							{#if total > 0}
+								<span class="text-[9px] font-medium text-[var(--color-text-muted)]">{total}</span>
+							{/if}
 						</div>
-						<span class="text-[9px] text-[var(--color-text-muted)]">
+					{/each}
+				</div>
+			</div>
+			<!-- Day labels -->
+			<div class="flex gap-1.5 pl-8">
+				{#each weeklyData as day}
+					<div class="flex flex-1 justify-center">
+						<span class="text-[10px] text-[var(--color-text-muted)]">
 							{new Date(day.date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' })}
 						</span>
 					</div>
 				{/each}
 			</div>
-			<div class="flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
-				<span class="flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-[var(--color-success-500)]"></span>Correct</span>
-				<span class="flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-[var(--color-warning-400)]"></span>Partial</span>
-				<span class="flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-[var(--color-error-500)]"></span>Incorrect</span>
+			<div class="flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
+				<span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-sm bg-[var(--color-success-500)]"></span>Correct</span>
+				<span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-sm bg-[var(--color-warning-400)]"></span>Partial</span>
+				<span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-sm bg-[var(--color-error-500)]"></span>Incorrect</span>
 			</div>
 		</div>
 
-		<!-- Leitner boxes (leitner only) -->
-		{#if settings.defaultAlgorithm === 'leitner'}
-			<div class="flex flex-col gap-3 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] p-4">
-				<span class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">Leitner Boxes</span>
-				<div class="grid grid-cols-5 gap-2">
-					{#each [1, 2, 3, 4, 5] as box, i}
-						<div class="flex flex-col items-center gap-1 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-800)] px-2 py-3">
-							<span class="text-xs font-semibold text-[var(--color-text-muted)]">Box {box}</span>
-							<span class="text-lg font-bold" style="color:{BOX_COLORS[i]}">{leitnerBoxCounts[i]}</span>
-							<span class="text-[9px] text-center text-[var(--color-text-muted)] leading-tight">{BOX_INTERVALS_LABELS[i]}</span>
-						</div>
-					{/each}
-				</div>
-			</div>
-		{/if}
 	</div>
 	{/if}
 	{/if}

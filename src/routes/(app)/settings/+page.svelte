@@ -1,6 +1,7 @@
 <script lang="ts">
 	import RoleSection from '$lib/settings/components/RoleSection.svelte';
 	import AISettingsSection from '$lib/settings/components/AISettingsSection.svelte';
+	import ReviewSettingsSection from '$lib/settings/components/ReviewSettingsSection.svelte';
 	import SharingSection from '$lib/settings/components/SharingSection.svelte';
 	import InstalledContentSection from '$lib/settings/components/InstalledContentSection.svelte';
 	import ExportImportSection from '$lib/settings/components/ExportImportSection.svelte';
@@ -19,6 +20,7 @@
 
 	<RoleSection />
 	<AISettingsSection />
+	<ReviewSettingsSection />
 	<SharingSection />
 	<InstalledContentSection />
 	<ExportImportSection />

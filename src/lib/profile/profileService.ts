@@ -36,6 +36,7 @@ function toPublicProfile(r: Record<string, unknown>): PublicProfile {
 		youtubeUrl: (r.youtubeUrl as string) ?? '',
 		websiteUrl: (r.websiteUrl as string) ?? '',
 		isProfilePublic: (r.isProfilePublic as boolean) ?? false,
+		isDeleted: (r.isDeleted as boolean) ?? false,
 		created: r.created as string
 	};
 }
@@ -87,12 +88,12 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
 export async function searchUsers(query: string): Promise<PublicProfile[]> {
 	try {
 		const filter = query.trim()
-			? `isProfilePublic = true && name ~ "${query}"`
-			: 'isProfilePublic = true';
+			? `isProfilePublic = true && isDeleted = false && name ~ "${query}"`
+			: 'isProfilePublic = true && isDeleted = false';
 		const records = await pb.collection('users').getFullList({
 			requestKey: null,
 			filter,
-			fields: 'id,name,avatar,bio,instagramUrl,youtubeUrl,websiteUrl,isProfilePublic,created',
+			fields: 'id,name,avatar,bio,instagramUrl,youtubeUrl,websiteUrl,isProfilePublic,isDeleted,created',
 			sort: 'name'
 		});
 		return records.map(toPublicProfile);
@@ -132,7 +133,6 @@ export async function getFollowers(userId: string): Promise<FollowerUser[]> {
 			const u = r.expand?.follower as Record<string, unknown> | undefined;
 			const uRec = u ?? {};
 			const id = (uRec.id as string) ?? (r.follower as string);
-			// If expand failed (deleted user), mark accordingly
 			if (!u || !(uRec.name || uRec.email)) {
 				return { id, name: '[deleted]', avatarUrl: '', bio: '' };
 			}
