@@ -34,6 +34,11 @@ export async function createUserAndRequestOtp(
 		throw e;
 	}
 
+	return resendOtp(email);
+}
+
+/** Re-request an OTP for a given email (used for resend) */
+export async function resendOtp(email: string): Promise<OtpRequest> {
 	try {
 		const result = await users().requestOTP(email);
 		return { otpId: result.otpId, email };
@@ -75,9 +80,21 @@ export function isAuthenticated(): boolean {
 	return pb.authStore.isValid;
 }
 
+/** Returns true if the current user has verified their email (has a valid auth token) */
+export function isEmailVerified(): boolean {
+	const record = pb.authStore.record;
+	if (!record) return false;
+	// PocketBase sets `verified` on the record after OTP confirmation
+	return (record.verified as boolean) ?? false;
+}
+
 export function logout(): void {
 	pb.authStore.clear();
 	roleStore.reset();
+	// Do NOT call localStorage.clear() here — AI keys are user-scoped
+	// (ai_key_{uid}_{provider}) and must survive logout so they persist
+	// when the same user logs back in. A different user logging in will
+	// only see keys scoped to their own uid.
 }
 
 export async function verifyPassword(password: string): Promise<boolean> {

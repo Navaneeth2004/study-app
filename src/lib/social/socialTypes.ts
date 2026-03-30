@@ -31,11 +31,12 @@ export interface Comment {
 	parentComment: string | null;
 	text: string;
 	isDeleted: boolean;
+	isPinned: boolean;
 	created: string;
 	updated: string;
 	upvotes: number;
 	downvotes: number;
-	userVote: 1 | -1 | null; // current user's vote
+	userVote: 1 | -1 | null;
 	expand?: {
 		user?: { id: string; name: string; email: string };
 	};

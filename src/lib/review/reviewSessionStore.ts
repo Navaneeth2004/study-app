@@ -3,12 +3,16 @@ import type { Flashcard } from '$lib/creator/flashcardTypes';
 import type { SessionResult } from './reviewTypes';
 import { recordReview } from './reviewService';
 
-export type SessionMode = 'review' | 'practice';
+// Only one mode now: "review" which works exactly like the old "practice" mode:
+// - Wrong/partial cards are pushed back to the end of the queue and repeat
+// - ONLY correct answers get scheduled in SM-2 (wrong answers are NOT penalised)
+// - Session completes only when every card has been answered correctly at least once
+export type SessionMode = 'review';
 
 export interface SessionState {
-	cards: Flashcard[];           // original card list
-	queue: Flashcard[];           // remaining queue (practice re-adds wrong cards)
-	currentIndex: number;         // index into queue
+	cards: Flashcard[];
+	queue: Flashcard[];
+	currentIndex: number;
 	flipped: boolean;
 	sessionResults: SessionResult[];
 	isComplete: boolean;
@@ -28,35 +32,34 @@ const empty: SessionState = {
 const session = writable<SessionState>(empty);
 
 export const reviewSession = { subscribe: session.subscribe };
-
 export const currentCard = derived(session, ($s) => $s.queue[$s.currentIndex] ?? null);
 
 export const reviewProgress = derived(session, ($s) => {
-	if ($s.mode === 'practice') {
-		// Progress based on original cards that are "done" (answered correct at least once)
-		const doneIds = new Set($s.sessionResults.filter((r) => r.rating === 'correct').map((r) => r.flashcardId));
-		return $s.cards.length > 0 ? (doneIds.size / $s.cards.length) * 100 : 0;
-	}
-	return $s.cards.length > 0 ? ($s.currentIndex / $s.cards.length) * 100 : 0;
+	// Progress = unique cards answered correctly / total cards
+	const doneIds = new Set(
+		$s.sessionResults.filter((r) => r.rating === 'correct').map((r) => r.flashcardId)
+	);
+	return $s.cards.length > 0 ? (doneIds.size / $s.cards.length) * 100 : 0;
 });
 
 export const reviewSummary = derived(session, ($s) => {
 	const correct = $s.sessionResults.filter((r) => r.rating === 'correct').length;
 	const partial = $s.sessionResults.filter((r) => r.rating === 'partial').length;
 	const incorrect = $s.sessionResults.filter((r) => r.rating === 'incorrect').length;
-	const totalInterval = $s.sessionResults.reduce((s, r) => s + r.nextInterval, 0);
-	const avgInterval = $s.sessionResults.length > 0
-		? Math.round(totalInterval / $s.sessionResults.length)
-		: 0;
-	const retention = $s.sessionResults.length > 0
-		? Math.round((correct / $s.sessionResults.length) * 100)
-		: 0;
-	// Unique cards mastered (answered correct at least once)
-	const masteredIds = new Set($s.sessionResults.filter((r) => r.rating === 'correct').map((r) => r.flashcardId));
-	return { correct, partial, incorrect, total: $s.sessionResults.length, avgInterval, retention, masteredCount: masteredIds.size, totalCards: $s.cards.length };
+	const masteredIds = new Set(
+		$s.sessionResults.filter((r) => r.rating === 'correct').map((r) => r.flashcardId)
+	);
+	return {
+		correct, partial, incorrect,
+		total: $s.sessionResults.length,
+		avgInterval: 0,
+		retention: $s.sessionResults.length > 0 ? Math.round((correct / $s.sessionResults.length) * 100) : 0,
+		masteredCount: masteredIds.size,
+		totalCards: $s.cards.length
+	};
 });
 
-export function startSession(cards: Flashcard[], mode: SessionMode = 'review'): void {
+export function startSession(cards: Flashcard[], _mode?: SessionMode): void {
 	session.set({
 		cards: [...cards],
 		queue: [...cards],
@@ -64,7 +67,7 @@ export function startSession(cards: Flashcard[], mode: SessionMode = 'review'): 
 		flipped: false,
 		sessionResults: [],
 		isComplete: false,
-		mode
+		mode: 'review'
 	});
 }
 
@@ -79,46 +82,27 @@ export async function rateCard(rating: 'correct' | 'partial' | 'incorrect'): Pro
 
 	let nextInterval = 1;
 
-	if ($s.mode === 'review') {
-		// Full SR scheduling — record in PocketBase
-		const schedule = await recordReview(card.id, rating, 'sm2');
-		nextInterval = schedule.interval;
-	}
-	// In practice mode: only record correct cards in PocketBase (so they get scheduled)
-	// Wrong/partial cards just re-queue — no PocketBase write for those
-	if ($s.mode === 'practice' && rating === 'correct') {
+	// Only schedule CORRECT answers in SM-2. Wrong/partial are NOT penalised.
+	if (rating === 'correct') {
 		const schedule = await recordReview(card.id, rating, 'sm2');
 		nextInterval = schedule.interval;
 	}
 
-	const result: SessionResult = {
-		flashcardId: card.id,
-		rating,
-		nextInterval
-	};
+	const result: SessionResult = { flashcardId: card.id, rating, nextInterval };
 
 	session.update((s) => {
 		const sessionResults = [...s.sessionResults, result];
+		let newQueue = [...s.queue];
+		newQueue.splice(s.currentIndex, 1);
 
-		if (s.mode === 'practice') {
-			// Remove card from queue at currentIndex
-			let newQueue = [...s.queue];
-			newQueue.splice(s.currentIndex, 1);
-
-			// If wrong or partial — push back to end of queue
-			if (rating !== 'correct') {
-				newQueue.push(card);
-			}
-
-			const isComplete = newQueue.length === 0;
-			const nextIndex = isComplete ? 0 : Math.min(s.currentIndex, newQueue.length - 1);
-			return { ...s, queue: newQueue, sessionResults, currentIndex: nextIndex, flipped: false, isComplete };
-		} else {
-			// Normal review — linear progression
-			const nextIndex = s.currentIndex + 1;
-			const isComplete = nextIndex >= s.queue.length;
-			return { ...s, sessionResults, currentIndex: isComplete ? s.currentIndex : nextIndex, flipped: false, isComplete };
+		if (rating !== 'correct') {
+			// Wrong or partial: push card to end of queue so it repeats
+			newQueue.push(card);
 		}
+
+		const isComplete = newQueue.length === 0;
+		const nextIndex = isComplete ? 0 : Math.min(s.currentIndex, newQueue.length - 1);
+		return { ...s, queue: newQueue, sessionResults, currentIndex: nextIndex, flipped: false, isComplete };
 	});
 }
 

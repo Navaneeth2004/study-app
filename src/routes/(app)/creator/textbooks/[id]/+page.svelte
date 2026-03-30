@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { getTextbook, updateTextbook } from '$lib/creator/textbookService';
+	import { getTextbook } from '$lib/creator/textbookService';
 	import { listChapters, createChapter, deleteChapter, reorderChapters } from '$lib/creator/chapterService';
-	import InlineEdit from '$lib/creator/components/InlineEdit.svelte';
 	import ChapterRow from '$lib/creator/components/ChapterRow.svelte';
 	import EmptyState from '$lib/shared/components/EmptyState.svelte';
 	import UnsavedChangesModal from '$lib/shared/components/UnsavedChangesModal.svelte';
+	import { pb } from '$lib/shared/pocketbase';
 	import type { Textbook, Chapter } from '$lib/creator/creatorTypes';
 
 	const textbookId = $derived($page.params.id as string);
@@ -16,6 +16,8 @@
 	let loading = $state(true);
 	let error = $state('');
 	let draggingId = $state<string | null>(null);
+	let blockCounts = $state<Record<string, number>>({});
+	let flashcardCounts = $state<Record<string, number>>({});
 
 	// New chapter modal
 	let showModal = $state(false);
@@ -37,14 +39,34 @@
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load textbook.';
 		} finally { loading = false; }
+
+		// Load block and flashcard counts in background
+		if (chapters.length > 0) {
+			try {
+				const uid = pb.authStore.record?.id ?? '';
+				const chapterIds = chapters.map((c) => c.id);
+				const [blocks, cards] = await Promise.all([
+					pb.collection('chapter_blocks').getFullList({
+						requestKey: null,
+						filter: '(' + chapterIds.map((id) => `chapter = "${id}"`).join(' || ') + ')',
+						fields: 'id,chapter'
+					}),
+					pb.collection('flashcards').getFullList({
+						requestKey: null,
+						filter: '(' + chapterIds.map((id) => `chapter = "${id}"`).join(' || ') + ')',
+						fields: 'id,chapter'
+					})
+				]);
+				const bc: Record<string, number> = {};
+				const fc: Record<string, number> = {};
+				for (const b of blocks) { const cid = b.chapter as string; bc[cid] = (bc[cid] ?? 0) + 1; }
+				for (const c of cards) { const cid = c.chapter as string; fc[cid] = (fc[cid] ?? 0) + 1; }
+				blockCounts = bc;
+				flashcardCounts = fc;
+			} catch { /* silent */ }
+		}
 	}
 
-	async function handleTitleSave(value: string) {
-		await updateTextbook(textbookId, { title: value });
-	}
-	async function handleDescriptionSave(value: string) {
-		await updateTextbook(textbookId, { description: value });
-	}
 	async function handleDeleteChapter(chapterId: string) {
 		try {
 			await deleteChapter(chapterId);
@@ -97,14 +119,11 @@
 	onLeave={() => { showDiscard = false; closeModal(); }}
 	onStay={() => (showDiscard = false)} />
 
-<!-- New Chapter Modal -->
 {#if showModal}
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 	<div class="fixed inset-0 z-50 flex items-center justify-center p-4"
 	     style="background: rgba(0,0,0,0.7);" onclick={attemptClose}>
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 		<div class="relative w-full max-w-md rounded-2xl border border-[var(--color-surface-700)]
 		            bg-[var(--color-surface-950)] shadow-2xl"
 		     onclick={(e) => e.stopPropagation()}>
@@ -152,20 +171,19 @@
 {#if loading}
 	<div class="flex flex-col gap-4">
 		<div class="h-8 w-48 rounded bg-[var(--color-surface-800)]"></div>
-		<div class="h-4 w-72 rounded bg-[var(--color-surface-800)]"></div>
+		<div class="h-32 rounded-xl bg-[var(--color-surface-800)]"></div>
 	</div>
 {:else if error}
 	<p class="text-sm text-[var(--color-error-400)]">{error}</p>
 {:else if textbook}
 	<div class="flex flex-col gap-8">
 		<div class="flex items-start justify-between gap-4">
-			<div class="flex flex-col gap-2 flex-1">
-				<InlineEdit bind:value={textbook.title} placeholder="Textbook title"
-					onSave={handleTitleSave}
-					displayClass="font-display text-3xl text-[var(--color-text-primary)]" />
-				<InlineEdit bind:value={textbook.description} placeholder="Add a description…"
-					onSave={handleDescriptionSave} multiline={true}
-					displayClass="text-[var(--color-text-secondary)]" />
+			<!-- Title and description are plain text — edit via the card's Edit button -->
+			<div class="flex flex-col gap-1 flex-1 min-w-0">
+				<h1 class="font-display text-3xl text-[var(--color-text-primary)] leading-tight">{textbook.title}</h1>
+				{#if textbook.description}
+					<p class="text-[var(--color-text-secondary)] text-sm">{textbook.description}</p>
+				{/if}
 			</div>
 			<button
 				onclick={openNewChapterModal}
@@ -187,6 +205,8 @@
 			<div role="list" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 				{#each chapters as chapter (chapter.id)}
 					<ChapterRow {chapter} textbookId={textbookId}
+						blockCount={blockCounts[chapter.id]}
+						flashcardCount={flashcardCounts[chapter.id]}
 						onDelete={handleDeleteChapter}
 						onDragStart={handleDragStart}
 						onDragOver={handleDragOver}

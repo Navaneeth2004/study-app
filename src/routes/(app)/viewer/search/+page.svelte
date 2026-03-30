@@ -22,7 +22,7 @@
 	function getMyId(): string { return (pb.authStore.record?.id as string) ?? ''; }
 
 	let query = $state('');
-	let mode = $state<'my' | 'universal' | 'people'>('my');
+	let mode = $state<Mode>('my');
 	let myResults = $state<SearchResults | null>(null);
 	let sharedTextbooks = $state<SharedTextbook[]>([]);
 	let sharedCategories = $state<SharedCategory[]>([]);
@@ -45,14 +45,25 @@
 		return installs.find((i) => i.contentId === contentId)?.id ?? null;
 	}
 
+	// Clear error whenever query or mode changes
+	$effect(() => {
+		// eslint-disable-next-line @typescript-eslint/no-unused-expressions
+		query; mode;
+		error = '';
+	});
+
 	$effect(() => {
 		clearTimeout(debounceTimer);
 		const q = query; const m = mode;
+		if (!q.trim()) {
+			myResults = null; sharedTextbooks = []; sharedCategories = []; peopleResults = []; peopleFollowMap = new Map();
+			return;
+		}
 		debounceTimer = setTimeout(() => runSearch(q, m), 300);
 	});
 
 	async function runSearch(q: string, m: Mode) {
-		if (!q.trim()) { myResults = null; sharedTextbooks = []; sharedCategories = []; peopleResults = []; peopleFollowMap = new Map(); return; }
+		if (!q.trim()) return;
 		searching = true; error = '';
 		try {
 			if (m === 'my') {
@@ -65,7 +76,7 @@
 				sharedTextbooks = sharedTextbooks.filter((t) => t.owner !== getMyId());
 				sharedCategories = sharedCategories.filter((c) => c.owner !== getMyId());
 			} else {
-				// People search — exclude self
+				// People search
 				const allPeople = await searchUsers(q);
 				peopleResults = allPeople.filter((p) => p.id !== getMyId());
 				const map = new Map<string, string | null>();
@@ -75,8 +86,16 @@
 				}));
 				peopleFollowMap = map;
 			}
-		} catch (e) { error = e instanceof Error ? e.message : 'Search failed.'; }
-		finally { searching = false; }
+		} catch (e) {
+			// Show a friendly error that goes away on next search
+			if (e instanceof Error) {
+				error = e.message.includes('400') || e.message.includes('Bad Request')
+					? 'Search is unavailable right now. Try again or adjust your query.'
+					: e.message;
+			} else {
+				error = 'Search failed.';
+			}
+		} finally { searching = false; }
 	}
 
 	async function handleFollowPerson(profile: PublicProfile) {
@@ -148,24 +167,34 @@
 	<div class="flex gap-1 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] p-1">
 		<button onclick={() => (mode = 'my')}
 			class="flex-1 rounded-lg py-1.5 text-sm font-medium transition-colors
-			       {mode === 'my' ? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}">
+			       {mode === 'my' ? 'bg-[var(--color-accent-500)] text-white' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}">
 			My Content
 		</button>
 		<button onclick={() => (mode = 'universal')}
 			class="flex-1 rounded-lg py-1.5 text-sm font-medium transition-colors
-			       {mode === 'universal' ? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}">
+			       {mode === 'universal' ? 'bg-[var(--color-accent-500)] text-white' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}">
 			Universal
 		</button>
-		<button
-			onclick={() => (mode = 'people')}
+		<button onclick={() => (mode = 'people')}
 			class="flex-1 rounded-lg py-1.5 text-sm font-medium transition-colors
-			       {mode === 'people' ? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}"
-		>
+			       {mode === 'people' ? 'bg-[var(--color-accent-500)] text-white' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}">
 			People
 		</button>
 	</div>
 
-	{#if error}<p class="text-sm text-[var(--color-error-400)]">{error}</p>{/if}
+	{#if error}
+		<div class="flex items-center gap-3 rounded-xl border border-[var(--color-warning-500)]/30
+		            bg-[var(--color-warning-500)]/5 px-4 py-3">
+			<p class="flex-1 text-sm text-[var(--color-text-secondary)]">{error}</p>
+			<button onclick={() => (error = '')}
+				class="shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+				aria-label="Dismiss">
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+					<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+				</svg>
+			</button>
+		</div>
+	{/if}
 
 	{#if searching}
 		<div class="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
@@ -174,7 +203,9 @@
 		</div>
 	{:else if !query.trim()}
 		<p class="text-sm text-[var(--color-text-muted)]">
-			{mode === 'my' ? 'Search across all your textbooks, chapters, flashcards and more.' : 'Discover shared content from all users. Click any result to view — install to save to your library.'}
+			{mode === 'my' ? 'Search your textbooks, chapters, flashcards and more.' :
+			 mode === 'universal' ? 'Discover shared content from all users.' :
+			 'Find other users by name.'}
 		</p>
 
 	{:else if mode === 'my'}
@@ -191,9 +222,7 @@
 		{/if}
 
 	{:else if mode === 'people'}
-		{#if !query.trim()}
-			<p class="text-sm text-[var(--color-text-muted)]">Search for users by name.</p>
-		{:else if peopleResults.length === 0 && !searching}
+		{#if peopleResults.length === 0 && !searching && !error}
 			<p class="text-sm text-[var(--color-text-muted)]">No users found for "{query}".</p>
 		{:else}
 			<div class="flex flex-col gap-2">
@@ -210,39 +239,33 @@
 		{/if}
 
 	{:else}
-		{#if !hasUniversal}
+		{#if !hasUniversal && !error}
 			<p class="text-sm text-[var(--color-text-muted)]">No shared content found for "{query}".</p>
 		{/if}
-
 		{#if sharedTextbooks.length > 0}
 			<section class="flex flex-col gap-3">
 				<h2 class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">Shared Textbooks</h2>
 				<div class="flex flex-col gap-2">
 					{#each sharedTextbooks as item (item.id)}
 						{@const iid = getInstallId(item.id)}
-						<SearchTextbookCard
-							{item} installId={iid} universal={true}
+						<SearchTextbookCard {item} installId={iid} universal={true}
 							onInstall={() => handleInstallTextbook(item)}
 							onUninstall={() => handleUninstallTextbook(item)}
-							onClick={() => goto(`/viewer/textbooks/${item.id}`)}
-						/>
+							onClick={() => goto(`/viewer/textbooks/${item.id}`)} />
 					{/each}
 				</div>
 			</section>
 		{/if}
-
 		{#if sharedCategories.length > 0}
 			<section class="flex flex-col gap-3">
 				<h2 class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">Shared Flashcard Decks</h2>
 				<div class="flex flex-col gap-2">
 					{#each sharedCategories as item (item.id)}
 						{@const iid = getInstallId(item.id)}
-						<SearchDeckCard
-							{item} installId={iid} universal={true}
+						<SearchDeckCard {item} installId={iid} universal={true}
 							onInstall={() => handleInstallCategory(item)}
 							onUninstall={() => handleUninstallCategory(item)}
-							onClick={() => goto(`/viewer/flashcards/category/${item.id}`)}
-						/>
+							onClick={() => goto(`/viewer/flashcards/category/${item.id}`)} />
 					{/each}
 				</div>
 			</section>

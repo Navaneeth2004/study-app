@@ -1,5 +1,5 @@
 import { pb } from '$lib/shared/pocketbase';
-import { triggerCommentNotification, triggerReplyNotification } from '$lib/notifications/inAppNotificationService';
+import { triggerCommentNotification, triggerReplyNotification, triggerUpvoteMilestone } from '$lib/notifications/inAppNotificationService';
 import { ClientResponseError } from 'pocketbase';
 import type { Comment, CommentVote } from './socialTypes';
 
@@ -12,6 +12,7 @@ function toComment(r: Record<string, unknown>): Comment {
 		parentComment: (r.parentId as string) || null,
 		text: r.text as string,
 		isDeleted: (r.isDeleted as boolean) ?? false,
+		isPinned: (r.isPinned as boolean) ?? false,
 		created: r.created as string,
 		updated: r.updated as string,
 		upvotes: 0,
@@ -67,7 +68,6 @@ export async function getComments(
 	perPage = 10
 ): Promise<{ comments: Comment[]; totalPages: number }> {
 	try {
-		// parentId is a plain Text field — top-level comments have it empty/null
 		const result = await pb.collection('content_comments').getList(page, perPage, {
 			requestKey: null,
 			filter: `contentType = "${contentType}" && contentId = "${contentId}" && (parentId = "" || parentId = null)`,
@@ -87,7 +87,12 @@ export async function getComments(
 		}
 
 		const withVotes = await loadVotes(topLevel);
-		withVotes.sort((a, b) => (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes));
+		// Pinned comments float to top, then sort by net votes
+		withVotes.sort((a, b) => {
+			if (a.isPinned && !b.isPinned) return -1;
+			if (!a.isPinned && b.isPinned) return 1;
+			return (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes);
+		});
 
 		return { comments: withVotes, totalPages: result.totalPages };
 	} catch (e) {
@@ -109,20 +114,19 @@ export async function createComment(
 			contentId,
 			text,
 			parentId: parentId || '',
-			isDeleted: false
+			isDeleted: false,
+			isPinned: false
 		}, { expand: 'user', requestKey: null });
 		const comment = toComment(r);
 		// Trigger notification (fire-and-forget)
 		try {
 			const commenterName = r.expand?.user?.name || r.expand?.user?.email || 'Someone';
-			// Get content owner ID
 			const collection = contentType === 'textbook' ? 'textbooks' : 'flashcard_categories';
 			const content = await pb.collection(collection).getOne(contentId, { requestKey: null, fields: 'owner,title,name,shareTitle' });
 			const ownerId = content.owner as string;
 			const title = (content.shareTitle as string) || (content.title as string) || (content.name as string) || '';
 			if (ownerId && ownerId !== pb.authStore.record?.id) {
 				if (parentId) {
-					// It's a reply — notify the parent comment owner
 					const parent = await pb.collection('content_comments').getOne(parentId, { requestKey: null, fields: 'user' });
 					if ((parent.user as string) !== pb.authStore.record?.id) {
 						triggerReplyNotification(parent.user as string, commenterName, title);
@@ -157,6 +161,15 @@ export async function softDeleteComment(id: string): Promise<void> {
 	}
 }
 
+export async function pinComment(id: string, pinned: boolean): Promise<void> {
+	try {
+		await pb.collection('content_comments').update(id, { isPinned: pinned });
+	} catch (e) {
+		if (e instanceof ClientResponseError) throw new Error(e.message);
+		throw e;
+	}
+}
+
 export async function voteComment(commentId: string, vote: 1 | -1): Promise<void> {
 	try {
 		const uid = pb.authStore.record?.id ?? '';
@@ -171,6 +184,28 @@ export async function voteComment(commentId: string, vote: 1 | -1): Promise<void
 			}
 		} else {
 			await pb.collection('comment_votes').create({ user: uid, comment: commentId, vote });
+		}
+
+		// Trigger upvote milestone notification when upvoting
+		if (vote === 1) {
+			try {
+				const allVotes = await pb.collection('comment_votes').getFullList({
+					requestKey: null,
+					filter: `comment = "${commentId}" && vote = 1`,
+					fields: 'id'
+				});
+				const upvoteCount = allVotes.length;
+				const commentRecord = await pb.collection('content_comments').getOne(commentId, { requestKey: null, fields: 'user,contentId,contentType' });
+				const commentOwnerId = commentRecord.user as string;
+				if (commentOwnerId && commentOwnerId !== uid) {
+					const contentId = commentRecord.contentId as string;
+					const contentType = commentRecord.contentType as string;
+					const collection = contentType === 'textbook' ? 'textbooks' : 'flashcard_categories';
+					const content = await pb.collection(collection).getOne(contentId, { requestKey: null, fields: 'title,name,shareTitle' });
+					const title = (content.shareTitle as string) || (content.title as string) || (content.name as string) || '';
+					triggerUpvoteMilestone(commentOwnerId, upvoteCount, title);
+				}
+			} catch { /* milestone notifications never block */ }
 		}
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);

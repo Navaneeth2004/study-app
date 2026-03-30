@@ -17,7 +17,6 @@
 
 	onMount(async () => {
 		await load();
-		// Refresh when tab gains focus
 		const handleFocus = () => load();
 		window.addEventListener('focus', handleFocus);
 		return () => window.removeEventListener('focus', handleFocus);
@@ -48,14 +47,26 @@
 	}
 
 	function handleNavigate(notification: InAppNotification) {
-		if (!notification.relatedContentId || !notification.relatedContentType) return;
-		if (notification.relatedContentType === 'textbook') {
-			goto(`/viewer/textbooks/${notification.relatedContentId}`);
-		} else if (notification.relatedContentType === 'flashcard_category') {
-			goto(`/viewer/flashcards/category/${notification.relatedContentId}`);
-		} else if (notification.relatedContentType === 'comment') {
-			// Navigate to content if we had contentId — just go to viewer home
-			goto('/viewer');
+		switch (notification.type) {
+			case 'study_reminder':
+				goto('/calendar');
+				break;
+			case 'comment_on_content':
+			case 'reply_to_comment':
+			case 'new_shared_content':
+			case 'install_milestone':
+				if (notification.relatedContentId && notification.relatedContentType) {
+					if (notification.relatedContentType === 'textbook') {
+						goto(`/viewer/textbooks/${notification.relatedContentId}`);
+					} else if (notification.relatedContentType === 'flashcard_category') {
+						goto(`/viewer/flashcards/category/${notification.relatedContentId}`);
+					}
+				}
+				break;
+			case 'new_follower_milestone':
+			case 'comment_upvote_milestone':
+				// No specific navigation — stay on page
+				break;
 		}
 	}
 </script>

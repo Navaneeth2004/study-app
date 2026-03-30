@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getComments, createComment, updateComment, softDeleteComment, voteComment } from '$lib/social/commentService';
+	import { getComments, createComment, updateComment, softDeleteComment, voteComment, pinComment } from '$lib/social/commentService';
 	import CommentItem from './CommentItem.svelte';
 	import CommentInput from './CommentInput.svelte';
 	import { pb } from '$lib/shared/pocketbase';
@@ -69,16 +69,26 @@
 		});
 	}
 
+	async function handlePin(id: string, pinned: boolean) {
+		try {
+			await pinComment(id, pinned);
+			comments = comments.map((c) => c.id === id ? { ...c, isPinned: pinned } : c);
+			// Re-sort: pinned comments first
+			comments = [...comments].sort((a, b) => {
+				if (a.isPinned && !b.isPinned) return -1;
+				if (!a.isPinned && b.isPinned) return 1;
+				return 0;
+			});
+		} catch { /* silent */ }
+	}
+
 	/** Update vote counts in-place — no full page reload */
 	async function handleVote(id: string, vote: 1 | -1) {
-		const uid = pb.authStore.record?.id ?? '';
-
-		// Optimistically find the comment/reply and determine current vote state
 		function updateVoteInList(list: Comment[]): Comment[] {
 			return list.map((c) => {
 				if (c.id === id) {
 					const wasVote = c.userVote;
-					const removing = wasVote === vote; // same vote = toggle off
+					const removing = wasVote === vote;
 					const wasOpposite = wasVote !== null && wasVote !== vote;
 					return {
 						...c,
@@ -96,14 +106,13 @@
 			});
 		}
 
-		// Optimistic update first (instant UI)
+		// Optimistic update first
 		comments = updateVoteInList(comments);
 
-		// Then persist
 		try {
 			await voteComment(id, vote);
-		} catch (e) {
-			// Roll back on failure by re-fetching
+		} catch {
+			// Roll back on failure
 			await loadComments(1);
 		}
 	}
@@ -144,6 +153,7 @@
 						onEdit={handleEdit}
 						onDelete={handleDelete}
 						onVote={handleVote}
+						onPin={handlePin}
 					/>
 				{/each}
 			</div>

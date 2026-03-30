@@ -59,7 +59,7 @@ async function searchChapters(textbookIds: string[], query: string): Promise<Sea
 			title: r.title as string,
 			subtitle: tbMap.get(r.textbook as string),
 			excerpt: getExcerpt(r.title as string, query),
-			navigationPath: `/viewer/textbooks/${r.textbook}/chapters/${r.id}`
+			navigationPath: `/viewer/textbooks/${r.textbook as string}/chapters/${r.id as string}`
 		}));
 	} catch { return []; }
 }
@@ -87,13 +87,16 @@ async function searchBlocks(textbookIds: string[], query: string): Promise<Searc
 			if (!text.toLowerCase().includes(query.toLowerCase())) return [];
 			const ch = chMap.get(r.chapter as string);
 			if (!ch) return [];
+			const textbookId = ch.textbook as string;
+			const chapterId = ch.id as string;
+			if (!textbookId || !chapterId) return [];
 			return [{
 				type: 'block' as const,
 				id: r.id as string,
 				title: text.slice(0, 60) || `${r.type} block`,
 				subtitle: ch.title as string,
 				excerpt: getExcerpt(text, query),
-				navigationPath: `/viewer/textbooks/${ch.textbook}/chapters/${ch.id}`
+				navigationPath: `/viewer/textbooks/${textbookId}/chapters/${chapterId}`
 			}];
 		});
 	} catch { return []; }
@@ -112,7 +115,7 @@ async function searchCategories(filter: string, query: string): Promise<SearchRe
 			title: r.name as string,
 			subtitle: (r.description as string) || undefined,
 			excerpt: getExcerpt(r.name as string, query),
-			navigationPath: `/viewer/flashcards/category/${r.id}`
+			navigationPath: `/viewer/flashcards/category/${r.id as string}`
 		}));
 	} catch { return []; }
 }
@@ -139,13 +142,14 @@ async function searchFlashcards(categoryIds: string[], query: string): Promise<S
 		return records.slice(0, MAX).map((r) => {
 			const front = r.front_text as string;
 			const back = r.back_text as string;
+			const categoryId = r.category as string;
 			return {
 				type: 'flashcard' as const,
 				id: r.id as string,
 				title: front.slice(0, 80),
-				subtitle: catMap.get(r.category as string),
+				subtitle: catMap.get(categoryId),
 				excerpt: getExcerpt(`${front} ${back}`, query),
-				navigationPath: `/viewer/flashcards/category/${r.category}`
+				navigationPath: `/viewer/flashcards/category/${categoryId}`
 			};
 		});
 	} catch { return []; }

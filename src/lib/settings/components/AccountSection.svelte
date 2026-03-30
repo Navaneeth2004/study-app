@@ -53,15 +53,13 @@
 				pb.collection('follows').delete(f.id as string, { requestKey: null })
 			));
 
-			// 5. Soft-delete user — set isDeleted, isProfilePublic=false
+			// 5. Soft-delete user
 			await pb.collection('users').update(uid, {
 				isDeleted: true,
 				isProfilePublic: false
 			});
 
-			// 6. Clear all localStorage including AI keys
-			localStorage.clear();
-
+			// 6. logout() already clears localStorage (AI keys etc.)
 			logout();
 			goto('/auth/login');
 		} catch (e) {

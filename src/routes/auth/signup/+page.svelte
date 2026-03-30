@@ -1,7 +1,12 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { createUserAndRequestOtp, verifyOtp } from '$lib/auth/authService';
-	import { validateSignupForm, validateEmail, validateName, validatePassword, validatePasswordConfirm } from '$lib/auth/authValidation';
+	import {
+		createUserAndRequestOtp, verifyOtp, resendOtp
+	} from '$lib/auth/authService';
+	import {
+		validateSignupForm, validateEmail, validateName,
+		validatePassword, validatePasswordConfirm
+	} from '$lib/auth/authValidation';
 	import OtpInput from '$lib/shared/components/OtpInput.svelte';
 	import FormField from '$lib/shared/components/FormField.svelte';
 	import type { AuthStep, ValidationErrors, OtpRequest } from '$lib/auth/authTypes';
@@ -34,8 +39,24 @@
 		await goto('/profile/setup');
 	}
 
-	function handleBack() { step = 'credentials'; otpRequest = null; serverError = ''; }
-	function handleKeydown(event: KeyboardEvent) { if (event.key === 'Enter') handleSendOtp(); }
+	async function handleResendOtp() {
+		if (!otpRequest) return;
+		const result = await resendOtp(otpRequest.email);
+		// Update the otpId so the new code can be verified
+		otpRequest = result;
+	}
+
+	function handleBack() {
+		step = 'credentials';
+		otpRequest = null;
+		serverError = '';
+		// Note: the PocketBase account is already created at this point.
+		// The user can log in and will be asked to verify in Settings.
+	}
+
+	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter') handleSendOtp();
+	}
 </script>
 
 <svelte:head><title>Sign up — StudyApp</title></svelte:head>
@@ -76,5 +97,10 @@
 		</p>
 	</div>
 {:else}
-	<OtpInput {email} onSubmit={handleVerifyOtp} onBack={handleBack} />
+	<OtpInput
+		{email}
+		onSubmit={handleVerifyOtp}
+		onBack={handleBack}
+		onResend={handleResendOtp}
+	/>
 {/if}

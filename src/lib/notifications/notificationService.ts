@@ -44,7 +44,6 @@ export async function listNotifications(): Promise<StudyNotification[]> {
 export async function createNotification(form: NotificationForm): Promise<StudyNotification> {
 	try {
 		const uid = pb.authStore.record?.id ?? '';
-		// Build scheduledAt ISO from date + time if once
 		let scheduledAt = '';
 		if (form.scheduleType === 'once' && form.scheduledAt && form.scheduledTime) {
 			scheduledAt = new Date(`${form.scheduledAt}T${form.scheduledTime}`).toISOString();
@@ -118,6 +117,25 @@ export async function updateLastFired(id: string): Promise<void> {
 	} catch { /* best-effort */ }
 }
 
+/** Create an in-app notification when a study reminder fires */
+async function createInAppStudyReminder(notification: StudyNotification): Promise<void> {
+	const uid = pb.authStore.record?.id;
+	if (!uid) return;
+	try {
+		await pb.collection('in_app_notifications').create({
+			user: uid,
+			type: 'study_reminder',
+			title: `🔔 ${notification.title}`,
+			body: notification.body || '',
+			relatedContentType: '',
+			relatedContentId: '',
+			relatedUserId: '',
+			relatedUserName: '',
+			isRead: false
+		}, { requestKey: null });
+	} catch { /* fire-and-forget */ }
+}
+
 // ── Browser Notification / Web Push ──────────────────────────────────────────
 
 export function getPermissionStatus(): NotificationPermissionStatus {
@@ -143,6 +161,8 @@ export function fireNotification(notification: StudyNotification): void {
 			data: { color: notification.color }
 		});
 		updateLastFired(notification.id);
+		// Also create in-app notification so it shows in the sidebar
+		createInAppStudyReminder(notification);
 	} catch (e) {
 		console.warn('Failed to fire notification:', e);
 	}

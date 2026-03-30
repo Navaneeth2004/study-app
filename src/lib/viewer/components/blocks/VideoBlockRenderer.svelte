@@ -1,8 +1,5 @@
 <script lang="ts">
-	interface Props {
-		data: Record<string, unknown>;
-	}
-
+	interface Props { data: Record<string, unknown>; }
 	let { data }: Props = $props();
 
 	const rawUrl = (data.url as string) ?? '';
@@ -20,21 +17,15 @@
 </script>
 
 {#if embedUrl}
-	<div class="flex flex-col gap-2">
-		<div class="relative w-full overflow-hidden rounded-xl border border-[var(--color-surface-700)]"
-		     style="padding-top: 56.25%;">
-			<iframe
-				src={embedUrl}
-				title={description || 'Video'}
-				class="absolute inset-0 h-full w-full"
-				frameborder="0"
-				allowfullscreen
-			></iframe>
+	<figure class="flex flex-col gap-2">
+		<div class="relative w-full overflow-hidden rounded-xl border border-[var(--color-surface-700)]" style="padding-top: 56.25%;">
+			<iframe src={embedUrl} title={description || 'Video'} class="absolute inset-0 h-full w-full" frameborder="0" allowfullscreen></iframe>
 		</div>
 		{#if description}
-			<p class="text-xs text-[var(--color-text-muted)]">{description}</p>
+			<!-- Centered caption — same as image -->
+			<figcaption class="text-center text-xs text-[var(--color-text-muted)]">{description}</figcaption>
 		{/if}
-	</div>
+	</figure>
 {:else if rawUrl}
 	<p class="text-sm text-[var(--color-error-400)]">Invalid video URL.</p>
 {/if}

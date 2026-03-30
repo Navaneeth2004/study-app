@@ -1,10 +1,13 @@
 import type { AIProvider } from '$lib/ai/aiTypes';
+import { pb } from '$lib/shared/pocketbase';
 
 const KEY_PREFIX = 'ai_key_';
 const ALL_PROVIDERS: AIProvider[] = ['openai', 'anthropic', 'gemini', 'groq'];
 
+/** Returns a user-scoped storage key, e.g. "ai_key_USER123_openai" */
 function storageKey(provider: AIProvider): string {
-	return `${KEY_PREFIX}${provider}`;
+	const uid = pb.authStore.record?.id ?? 'anon';
+	return `${KEY_PREFIX}${uid}_${provider}`;
 }
 
 export function getKey(provider: AIProvider): string {

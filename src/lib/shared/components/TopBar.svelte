@@ -17,7 +17,7 @@
 
 	async function handleLogout() {
 		loggingOut = true;
-		logout(); // clears auth + resets roleStore
+		logout(); // clears auth + resets roleStore + clears localStorage
 		showLogoutModal = false;
 		await goto('/auth/login');
 		loggingOut = false;
@@ -86,7 +86,9 @@
 
 	function navigateTo(item: SearchResultItem) {
 		closeSearch();
-		goto(item.href);
+		if (item.navigationPath && item.navigationPath !== '/undefined') {
+			goto(item.navigationPath);
+		}
 	}
 </script>
 
@@ -149,6 +151,10 @@
 					bind:this={inputEl}
 					bind:value={query}
 					type="search"
+					autocomplete="off"
+					autocorrect="off"
+					autocapitalize="off"
+					spellcheck="false"
 					placeholder="Search everything…"
 					class="w-full rounded-xl border border-[var(--color-accent-500)]/50 bg-[var(--color-surface-800)]
 					       py-2 pl-9 pr-9 text-sm text-[var(--color-text-primary)]
@@ -200,7 +206,7 @@
 		{/if}
 	</div>
 
-	<!-- Right side: user name + mobile search + logout — consistent gap-3 throughout -->
+	<!-- Right side: user name + mobile search + logout -->
 	{#if !searchOpen}
 		<div class="flex shrink-0 items-center gap-3 ml-auto">
 			{#if user}

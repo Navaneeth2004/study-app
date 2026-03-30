@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import Sidebar from '$lib/shared/components/Sidebar.svelte';
 	import TopBar from '$lib/shared/components/TopBar.svelte';
 	import NotificationPermissionBanner from '$lib/shared/components/NotificationPermissionBanner.svelte';
 	import { startPolling, stopPolling } from '$lib/notifications/notificationPoller';
 	import { startReviewPolling, stopReviewPolling } from '$lib/review/reviewDueCountStore';
+	import { getMyProfile } from '$lib/profile/profileService';
 
 	interface Props {
 		children: import('svelte').Snippet;
@@ -19,6 +22,19 @@
 	onMount(() => {
 		startPolling();
 		startReviewPolling();
+
+		// Check if the user has completed profile setup.
+		// Don't redirect if they're already on /profile/setup.
+		if (!$page.url.pathname.startsWith('/profile/setup')) {
+			getMyProfile().then((profile) => {
+				if (!profile.profileSetupDone) {
+					goto('/profile/setup');
+				}
+			}).catch(() => {
+				// If profile fetch fails (network etc.), don't block the user
+			});
+		}
+
 		return () => {
 			stopPolling();
 			stopReviewPolling();

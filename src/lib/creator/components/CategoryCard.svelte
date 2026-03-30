@@ -10,6 +10,16 @@
 	let { category, onEdit, onDelete }: Props = $props();
 
 	let confirmingDelete = $state(false);
+
+	function formatRelativeDate(iso: string): string {
+		const diff = Date.now() - new Date(iso).getTime();
+		const days = Math.floor(diff / 86_400_000);
+		if (days === 0) return 'Today';
+		if (days === 1) return 'Yesterday';
+		if (days < 7) return `${days}d ago`;
+		if (days < 30) return `${Math.floor(days / 7)}w ago`;
+		return `${Math.floor(days / 30)}mo ago`;
+	}
 </script>
 
 <div class="app-card group">
@@ -68,15 +78,23 @@
 		</div>
 	</div>
 
-	<div class="flex flex-col gap-2">
-		{#if category.cardCount !== undefined}
-			<span class="text-xs text-[var(--color-text-muted)]">
-				{category.cardCount} {category.cardCount === 1 ? 'card' : 'cards'}
+	<div class="flex items-center justify-between gap-2">
+		<div class="flex items-center gap-3">
+			{#if category.cardCount !== undefined}
+				<span class="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
+					<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+						<rect x="2" y="4" width="14" height="10" rx="2"/><rect x="8" y="10" width="14" height="10" rx="2"/>
+					</svg>
+					{category.cardCount} {category.cardCount === 1 ? 'card' : 'cards'}
+				</span>
+			{/if}
+			<span class="text-[10px] text-[var(--color-text-muted)]">
+				{formatRelativeDate(category.updated)}
 			</span>
-		{/if}
+		</div>
 		{#if confirmingDelete}
-			<div class="flex items-center gap-2 mt-1">
-				<span class="text-xs text-[var(--color-text-secondary)]">Delete this category?</span>
+			<div class="flex items-center gap-2">
+				<span class="text-xs text-[var(--color-text-secondary)]">Delete?</span>
 				<button
 					onclick={() => { confirmingDelete = false; onDelete(category.id); }}
 					class="rounded-lg bg-[var(--color-error-500)]/15 px-2 py-1 text-xs font-medium

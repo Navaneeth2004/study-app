@@ -87,16 +87,23 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
 
 export async function searchUsers(query: string): Promise<PublicProfile[]> {
 	try {
+		// Use only isProfilePublic filter — isDeleted may not exist on all deployments
+		// and causes a 400. We filter isDeleted client-side instead.
 		const filter = query.trim()
-			? `isProfilePublic = true && isDeleted = false && name ~ "${query}"`
-			: 'isProfilePublic = true && isDeleted = false';
+			? `isProfilePublic = true && name ~ "${query.trim().replace(/"/g, '\\"')}"`
+			: 'isProfilePublic = true';
+
 		const records = await pb.collection('users').getFullList({
 			requestKey: null,
 			filter,
 			fields: 'id,name,avatar,bio,instagramUrl,youtubeUrl,websiteUrl,isProfilePublic,isDeleted,created',
 			sort: 'name'
 		});
-		return records.map(toPublicProfile);
+
+		// Filter out deleted accounts client-side
+		return records
+			.map(toPublicProfile)
+			.filter((p) => !p.isDeleted);
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
 		throw e;

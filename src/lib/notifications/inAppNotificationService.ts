@@ -7,7 +7,8 @@ export type InAppNotificationType =
 	| 'comment_on_content'
 	| 'reply_to_comment'
 	| 'new_shared_content'
-	| 'comment_like_milestone';
+	| 'comment_upvote_milestone'
+	| 'study_reminder';
 
 export interface InAppNotification {
 	id: string;
@@ -25,7 +26,7 @@ export interface InAppNotification {
 
 export const FOLLOWER_MILESTONES = [1, 10, 100, 1000, 10000];
 export const INSTALL_MILESTONES = [1, 10, 100, 1000, 10000];
-export const LIKE_MILESTONES = [1, 10, 100, 1000];
+export const UPVOTE_MILESTONES = [1, 10, 100, 1000];
 
 function toNotification(r: Record<string, unknown>): InAppNotification {
 	return {
@@ -108,7 +109,7 @@ async function createNotification(data: {
 	} catch { /* fire-and-forget, never block */ }
 }
 
-// ── Trigger functions (fire-and-forget) ────────────────────────────────────
+// ── Trigger functions (fire-and-forget) ──────────────────────────────────────
 
 export function triggerFollowMilestone(userId: string, followerCount: number): void {
 	if (!FOLLOWER_MILESTONES.includes(followerCount)) return;
@@ -163,12 +164,12 @@ export function triggerNewContentNotification(
 	});
 }
 
-export function triggerCommentLikeMilestone(
-	commentOwnerId: string, likeCount: number, contentTitle: string
+export function triggerUpvoteMilestone(
+	commentOwnerId: string, upvoteCount: number, contentTitle: string
 ): void {
-	if (!LIKE_MILESTONES.includes(likeCount)) return;
+	if (!UPVOTE_MILESTONES.includes(upvoteCount)) return;
 	createNotification({
-		user: commentOwnerId, type: 'comment_like_milestone',
-		title: `❤️ Your comment on "${contentTitle}" reached ${likeCount} like${likeCount > 1 ? 's' : ''}!`,
+		user: commentOwnerId, type: 'comment_upvote_milestone',
+		title: `⬆️ Your comment on "${contentTitle}" reached ${upvoteCount} upvote${upvoteCount > 1 ? 's' : ''}!`,
 	});
 }

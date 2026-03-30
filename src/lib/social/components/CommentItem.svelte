@@ -2,8 +2,6 @@
 	import CommentInput from './CommentInput.svelte';
 	import type { Comment } from '$lib/social/socialTypes';
 	import { pb } from '$lib/shared/pocketbase';
-	import { likeComment, unlikeComment, isLiked, getLikeCount } from '$lib/social/commentLikeService';
-	import { onMount } from 'svelte';
 
 	interface Props {
 		comment: Comment;
@@ -14,13 +12,15 @@
 		onEdit: (id: string, text: string) => Promise<void>;
 		onDelete: (id: string) => Promise<void>;
 		onVote: (id: string, vote: 1 | -1) => Promise<void>;
+		onPin?: (id: string, pinned: boolean) => Promise<void>;
 	}
 
-	let { comment, contentOwnerId = '', contentTitle = '', depth = 0, onReply, onEdit, onDelete, onVote }: Props = $props();
+	let { comment, contentOwnerId = '', contentTitle = '', depth = 0, onReply, onEdit, onDelete, onVote, onPin }: Props = $props();
 
 	const currentUserId = pb.authStore.record?.id ?? '';
 	const isOwner = $derived(comment.user === currentUserId);
 	const isContentAuthor = $derived(!!contentOwnerId && comment.user === contentOwnerId);
+	const isCurrentUserContentAuthor = $derived(!!contentOwnerId && contentOwnerId === currentUserId);
 	const displayName = $derived(comment.expand?.user?.name || comment.expand?.user?.email || 'Anonymous');
 	const commentUserId = $derived(comment.expand?.user?.id || comment.user);
 	const isOwnComment = $derived(commentUserId === currentUserId);
@@ -33,38 +33,6 @@
 	let votingUp = $state(false);
 	let votingDown = $state(false);
 
-	// Like state
-	let likeId = $state<string | null>(null);
-	let likeCount = $state(0);
-	let liking = $state(false);
-
-	onMount(async () => {
-		const [id, count] = await Promise.all([
-			isLiked(comment.id),
-			getLikeCount(comment.id)
-		]);
-		likeId = id;
-		likeCount = count;
-	});
-
-	async function handleLike() {
-		if (liking) return;
-		liking = true;
-		try {
-			if (likeId) {
-				await unlikeComment(likeId);
-				likeId = null;
-				likeCount = Math.max(0, likeCount - 1);
-			} else {
-				const result = await likeComment(comment.id, comment.user, contentTitle);
-				likeId = result.likeId;
-				likeCount = result.likeCount;
-			}
-		} catch { /* silent */ } finally {
-			liking = false;
-		}
-	}
-
 	function formatDate(iso: string): string {
 		const d = new Date(iso);
 		return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
@@ -74,10 +42,17 @@
 </script>
 
 <div class="flex flex-col gap-2 {depth > 0 ? 'ml-6 pl-4 border-l border-[var(--color-surface-700)]' : ''}">
-	<div class="flex flex-col gap-2 rounded-xl border border-[var(--color-surface-700)]
-	            bg-[var(--color-surface-900)] px-4 py-3">
+	<div class="flex flex-col gap-2 rounded-xl border
+	            {comment.isPinned ? 'border-[var(--color-accent-500)]/40 bg-[var(--color-accent-500)]/5' : 'border-[var(--color-surface-700)] bg-[var(--color-surface-900)]'}
+	            px-4 py-3">
 		<!-- Header -->
 		<div class="flex items-center gap-2 flex-wrap">
+			{#if comment.isPinned}
+				<span class="flex items-center gap-1 text-xs font-medium text-[var(--color-accent-400)]">
+					<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+					Pinned
+				</span>
+			{/if}
 			<!-- Commenter name — links to profile unless own -->
 			{#if isOwnComment}
 				<span class="text-sm font-medium text-[var(--color-text-primary)]">{displayName}</span>
@@ -128,7 +103,7 @@
 		<!-- Actions row -->
 		{#if !comment.isDeleted && !editing}
 			<div class="flex items-center gap-2 flex-wrap">
-				<!-- Upvote / Downvote -->
+				<!-- Upvote -->
 				<button
 					onclick={async () => { votingUp = true; try { await onVote(comment.id, 1); } finally { votingUp = false; } }}
 					disabled={votingUp}
@@ -143,6 +118,7 @@
 					</svg>
 					{comment.upvotes}
 				</button>
+				<!-- Downvote -->
 				<button
 					onclick={async () => { votingDown = true; try { await onVote(comment.id, -1); } finally { votingDown = false; } }}
 					disabled={votingDown}
@@ -163,24 +139,6 @@
 					</span>
 				{/if}
 
-				<!-- Heart / Like button -->
-				<button
-					onclick={handleLike}
-					disabled={liking}
-					class="flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs transition-colors
-					       {likeId
-						? 'text-[var(--color-error-400)]'
-						: 'text-[var(--color-text-muted)] hover:text-[var(--color-error-400)] hover:bg-[var(--color-surface-800)]'}"
-					aria-label={likeId ? 'Unlike' : 'Like'}
-				>
-					<svg width="12" height="12" viewBox="0 0 24 24"
-					     fill={likeId ? 'currentColor' : 'none'}
-					     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
-					</svg>
-					{#if likeCount > 0}{likeCount}{/if}
-				</button>
-
 				{#if depth === 0}
 					<button onclick={() => (showReply = !showReply)}
 						class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
@@ -195,8 +153,21 @@
 					</button>
 				{/if}
 
-				{#if isOwner && !editing}
-					<div class="flex items-center gap-2 ml-auto">
+				<div class="flex items-center gap-2 ml-auto">
+					<!-- Pin button — only for content author, only on top-level comments -->
+					{#if isCurrentUserContentAuthor && depth === 0 && onPin}
+						<button onclick={() => onPin!(comment.id, !comment.isPinned)}
+							class="text-xs transition-colors
+							       {comment.isPinned
+								? 'text-[var(--color-accent-400)] hover:text-[var(--color-text-muted)]'
+								: 'text-[var(--color-text-muted)] hover:text-[var(--color-accent-400)]'}"
+							aria-label={comment.isPinned ? 'Unpin comment' : 'Pin comment'}
+						>
+							{comment.isPinned ? 'Unpin' : 'Pin'}
+						</button>
+					{/if}
+
+					{#if isOwner && !editing}
 						<button onclick={() => { editing = true; editText = comment.text; }}
 							class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
 							Edit
@@ -213,8 +184,8 @@
 							<button onclick={() => (confirmDelete = false)}
 								class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">No</button>
 						{/if}
-					</div>
-				{/if}
+					{/if}
+				</div>
 			</div>
 		{/if}
 	</div>

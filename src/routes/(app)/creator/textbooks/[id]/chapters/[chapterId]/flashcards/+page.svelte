@@ -152,7 +152,12 @@
 	</div>
 
 	<div class="flex items-center justify-between gap-4">
-		<h1 class="font-display text-3xl text-[var(--color-text-primary)]">Flashcards</h1>
+		<div class="flex flex-col gap-0.5">
+			<h1 class="font-display text-3xl text-[var(--color-text-primary)]">Flashcards</h1>
+			{#if flashcards.length > 0}
+				<p class="text-sm text-[var(--color-text-secondary)]">{flashcards.length} {flashcards.length === 1 ? 'card' : 'cards'} in this chapter</p>
+			{/if}
+		</div>
 		<div class="flex shrink-0 items-center gap-2">
 			<button
 				onclick={() => (showAIModal = true)}

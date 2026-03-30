@@ -23,9 +23,7 @@
 	function handleUrlChange() {
 		if (url.trim() && !embedUrl) {
 			urlError = 'Must be a YouTube or Vimeo URL.';
-		} else {
-			urlError = '';
-		}
+		} else { urlError = ''; }
 		onUpdate({ url, description });
 	}
 </script>
@@ -44,33 +42,25 @@
 			       focus:border-[var(--color-accent-500)] transition-colors
 			       {urlError ? 'border-[var(--color-error-400)]' : ''}"
 		/>
-		{#if urlError}
-			<p class="text-xs text-[var(--color-error-400)]">{urlError}</p>
-		{/if}
+		{#if urlError}<p class="text-xs text-[var(--color-error-400)]">{urlError}</p>{/if}
 	</div>
 
 	{#if embedUrl}
-		<div class="relative w-full overflow-hidden rounded-xl border border-[var(--color-surface-700)]"
-		     style="padding-top: 56.25%;">
-			<iframe
-				src={embedUrl}
-				title="Video preview"
-				class="absolute inset-0 h-full w-full"
-				frameborder="0"
-				allowfullscreen
-			></iframe>
+		<div class="relative w-full overflow-hidden rounded-xl border border-[var(--color-surface-700)]" style="padding-top: 56.25%;">
+			<iframe src={embedUrl} title="Video preview" class="absolute inset-0 h-full w-full" frameborder="0" allowfullscreen></iframe>
 		</div>
 	{/if}
 
+	<!-- Description — centered like image caption, below the video -->
 	<div class="flex flex-col gap-1.5">
-		<label class="text-xs font-medium text-[var(--color-text-secondary)]">Description / timestamps (optional)</label>
-		<textarea
+		<input
 			bind:value={description}
 			oninput={() => onUpdate({ url, description })}
-			rows={2}
-			placeholder="Add a description or timestamps…"
-			class="w-full resize-none bg-transparent text-sm text-[var(--color-text-primary)]
-			       placeholder:text-[var(--color-text-muted)] focus:outline-none"
-		></textarea>
+			type="text"
+			placeholder="Caption / description (optional)…"
+			class="w-full bg-transparent text-sm text-center text-[var(--color-text-secondary)]
+			       placeholder:text-[var(--color-text-muted)] focus:outline-none
+			       border-b border-[var(--color-surface-700)] pb-1"
+		/>
 	</div>
 </div>

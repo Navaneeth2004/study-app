@@ -36,18 +36,15 @@
 		} catch (e) { error = e instanceof Error ? e.message : 'Could not delete textbook.'; }
 	}
 
-	function openModal() {
-		title = ''; description = ''; formError = ''; showModal = true;
+	function handleUpdated(id: string, updated: { title: string; description: string }) {
+		textbooks = textbooks.map((t) =>
+			t.id === id ? { ...t, title: updated.title, description: updated.description } : t
+		);
 	}
 
-	function attemptClose() {
-		if (isDirty) showDiscard = true;
-		else closeModal();
-	}
-
-	function closeModal() {
-		showModal = false; title = ''; description = ''; formError = '';
-	}
+	function openModal() { title = ''; description = ''; formError = ''; showModal = true; }
+	function attemptClose() { if (isDirty) showDiscard = true; else closeModal(); }
+	function closeModal() { showModal = false; title = ''; description = ''; formError = ''; }
 
 	async function handleCreate() {
 		if (!title.trim()) { formError = 'Title is required.'; return; }
@@ -60,16 +57,11 @@
 		finally { saving = false; }
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter') handleCreate();
-	}
+	function handleKeydown(e: KeyboardEvent) { if (e.key === 'Enter') handleCreate(); }
 </script>
 
-<svelte:head>
-	<title>My Textbooks — StudyApp</title>
-</svelte:head>
+<svelte:head><title>My Textbooks — StudyApp</title></svelte:head>
 
-<!-- Unsaved changes guard (z-[60] above modal z-50) -->
 <UnsavedChangesModal
 	isOpen={showDiscard}
 	zClass="z-[60]"
@@ -79,14 +71,11 @@
 	onStay={() => (showDiscard = false)}
 />
 
-<!-- New Textbook Modal -->
 {#if showModal}
-	<!-- svelte-ignore a11y_click_events_have_key_events -->
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 	<div class="fixed inset-0 z-50 flex items-center justify-center p-4"
 	     style="background: rgba(0,0,0,0.7);" onclick={attemptClose}>
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 		<div class="relative w-full max-w-md rounded-2xl border border-[var(--color-surface-700)]
 		            bg-[var(--color-surface-950)] shadow-2xl"
 		     onclick={(e) => e.stopPropagation()}>
@@ -146,12 +135,10 @@
 			<h1 class="font-display text-3xl text-[var(--color-text-primary)]">My Textbooks</h1>
 			<p class="text-[var(--color-text-secondary)]">Create and manage your study materials.</p>
 		</div>
-		<button
-			onclick={openModal}
+		<button onclick={openModal}
 			class="flex items-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-2.5
 			       text-sm font-medium text-white hover:bg-[var(--color-accent-400)]
-			       transition-colors shrink-0"
-		>
+			       transition-colors shrink-0">
 			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
 				<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
 			</svg>
@@ -175,7 +162,11 @@
 	{:else}
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 			{#each textbooks as textbook (textbook.id)}
-				<TextbookCard {textbook} onDelete={handleDelete} />
+				<TextbookCard
+					{textbook}
+					onDelete={handleDelete}
+					onUpdated={(updated) => handleUpdated(textbook.id, updated)}
+				/>
 			{/each}
 		</div>
 	{/if}
