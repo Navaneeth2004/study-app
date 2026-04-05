@@ -47,26 +47,46 @@
 	}
 
 	function handleNavigate(notification: InAppNotification) {
-		switch (notification.type) {
-			case 'study_reminder':
-				goto('/calendar');
-				break;
-			case 'comment_on_content':
-			case 'reply_to_comment':
-			case 'new_shared_content':
-			case 'install_milestone':
-				if (notification.relatedContentId && notification.relatedContentType) {
-					if (notification.relatedContentType === 'textbook') {
-						goto(`/viewer/textbooks/${notification.relatedContentId}`);
-					} else if (notification.relatedContentType === 'flashcard_category') {
-						goto(`/viewer/flashcards/category/${notification.relatedContentId}`);
-					}
-				}
-				break;
-			case 'new_follower_milestone':
-			case 'comment_upvote_milestone':
-				// No specific navigation — stay on page
-				break;
+		const { relatedContentType, relatedContentId, type } = notification;
+
+		if (type === 'comment_on_content' || type === 'reply_to_comment' ||
+		    type === 'comment_upvote_milestone' || type === 'comment_like_milestone') {
+			// Navigate to the content page where the comment lives
+			if (relatedContentType === 'textbook' && relatedContentId) {
+				goto(`/viewer/textbooks/${relatedContentId}`);
+			} else if (relatedContentType === 'flashcard_category' && relatedContentId) {
+				goto(`/viewer/flashcards/category/${relatedContentId}`);
+			} else {
+				goto('/viewer');
+			}
+			return;
+		}
+
+		if (type === 'new_shared_content') {
+			if (relatedContentType === 'textbook' && relatedContentId) {
+				goto(`/viewer/textbooks/${relatedContentId}`);
+			} else if (relatedContentType === 'flashcard_category' && relatedContentId) {
+				goto(`/viewer/flashcards/category/${relatedContentId}`);
+			}
+			return;
+		}
+
+		if (type === 'install_milestone') {
+			// Navigate to creator view of their content
+			goto('/profile');
+			return;
+		}
+
+		if (type === 'new_follower_milestone') {
+			goto('/profile');
+			return;
+		}
+
+		// Fallback: if we have a content id/type, try to navigate
+		if (relatedContentType === 'textbook' && relatedContentId) {
+			goto(`/viewer/textbooks/${relatedContentId}`);
+		} else if (relatedContentType === 'flashcard_category' && relatedContentId) {
+			goto(`/viewer/flashcards/category/${relatedContentId}`);
 		}
 	}
 </script>
@@ -74,26 +94,21 @@
 <svelte:head><title>Notifications — StudyApp</title></svelte:head>
 
 <div class="flex flex-col gap-6 max-w-2xl">
-	<!-- Header -->
 	<div class="flex items-center justify-between gap-4">
 		<h1 class="font-display text-3xl text-[var(--color-text-primary)]">Notifications</h1>
 		{#if hasUnread}
 			<button onclick={handleMarkAll}
-				class="rounded-xl border border-[var(--color-surface-600)] px-4 py-2 text-sm
-				       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">
+				class="rounded-xl border border-[var(--color-surface-600)] px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">
 				Mark all as read
 			</button>
 		{/if}
 	</div>
 
-	<!-- Tabs -->
 	<div class="flex gap-1 border-b border-[var(--color-surface-700)]">
 		{#each (['all', 'unread'] as const) as t}
 			<button onclick={() => (tab = t)}
-				class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors capitalize
-				       {tab === t
-					? 'border-[var(--color-accent-500)] text-[var(--color-accent-400)]'
-					: 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}">
+				class="px-4 py-2 text-sm font-medium border-b-2 -mb-px capitalize transition-colors
+				       {tab === t ? 'border-[var(--color-accent-500)] text-[var(--color-accent-400)]' : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}">
 				{t}
 			</button>
 		{/each}
@@ -107,8 +122,7 @@
 		</div>
 	{:else if filtered.length === 0}
 		<div class="flex flex-col items-center gap-3 py-16 text-center">
-			<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-			     stroke-width="1.3" stroke-linecap="round" class="text-[var(--color-text-muted)]">
+			<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" class="text-[var(--color-text-muted)]">
 				<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
 				<path d="M13.73 21a2 2 0 01-3.46 0"/>
 			</svg>

@@ -1,5 +1,8 @@
 import { pb } from '$lib/shared/pocketbase';
-import { triggerCommentNotification, triggerReplyNotification, triggerUpvoteMilestone } from '$lib/notifications/inAppNotificationService';
+import {
+	triggerCommentNotification, triggerReplyNotification,
+	triggerCommentUpvoteMilestone
+} from '$lib/notifications/inAppNotificationService';
 import { ClientResponseError } from 'pocketbase';
 import type { Comment, CommentVote } from './socialTypes';
 
@@ -12,7 +15,6 @@ function toComment(r: Record<string, unknown>): Comment {
 		parentComment: (r.parentId as string) || null,
 		text: r.text as string,
 		isDeleted: (r.isDeleted as boolean) ?? false,
-		isPinned: (r.isPinned as boolean) ?? false,
 		created: r.created as string,
 		updated: r.updated as string,
 		upvotes: 0,
@@ -38,10 +40,8 @@ async function loadVotes(comments: Comment[]): Promise<Comment[]> {
 			requestKey: null, filter: idFilter
 		});
 		votes = records.map((r) => ({
-			id: r.id as string,
-			user: r.user as string,
-			comment: r.comment as string,
-			vote: r.vote as 1 | -1
+			id: r.id as string, user: r.user as string,
+			comment: r.comment as string, vote: r.vote as 1 | -1
 		}));
 	} catch { /* votes collection may not exist yet */ }
 
@@ -51,9 +51,7 @@ async function loadVotes(comments: Comment[]): Promise<Comment[]> {
 		const downvotes = cv.filter((v) => v.vote === -1).length;
 		const userVoteRecord = uid ? cv.find((v) => v.user === uid) : undefined;
 		return {
-			...c,
-			upvotes,
-			downvotes,
+			...c, upvotes, downvotes,
 			userVote: userVoteRecord ? userVoteRecord.vote : null,
 			replies: (c.replies ?? []).map(applyVotes)
 		};
@@ -62,10 +60,7 @@ async function loadVotes(comments: Comment[]): Promise<Comment[]> {
 }
 
 export async function getComments(
-	contentType: string,
-	contentId: string,
-	page = 1,
-	perPage = 10
+	contentType: string, contentId: string, page = 1, perPage = 10
 ): Promise<{ comments: Comment[]; totalPages: number }> {
 	try {
 		const result = await pb.collection('content_comments').getList(page, perPage, {
@@ -75,25 +70,14 @@ export async function getComments(
 			expand: 'user'
 		});
 		const topLevel = result.items.map(toComment);
-
 		for (const comment of topLevel) {
 			const replies = await pb.collection('content_comments').getFullList({
-				requestKey: null,
-				filter: `parentId = "${comment.id}"`,
-				sort: 'created',
-				expand: 'user'
+				requestKey: null, filter: `parentId = "${comment.id}"`, sort: 'created', expand: 'user'
 			});
 			comment.replies = replies.map(toComment);
 		}
-
 		const withVotes = await loadVotes(topLevel);
-		// Pinned comments float to top, then sort by net votes
-		withVotes.sort((a, b) => {
-			if (a.isPinned && !b.isPinned) return -1;
-			if (!a.isPinned && b.isPinned) return 1;
-			return (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes);
-		});
-
+		withVotes.sort((a, b) => (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes));
 		return { comments: withVotes, totalPages: result.totalPages };
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
@@ -102,23 +86,14 @@ export async function getComments(
 }
 
 export async function createComment(
-	contentType: string,
-	contentId: string,
-	text: string,
-	parentId?: string
+	contentType: string, contentId: string, text: string, parentId?: string
 ): Promise<Comment> {
 	try {
 		const r = await pb.collection('content_comments').create({
-			user: pb.authStore.record?.id,
-			contentType,
-			contentId,
-			text,
-			parentId: parentId || '',
-			isDeleted: false,
-			isPinned: false
+			user: pb.authStore.record?.id, contentType, contentId,
+			text, parentId: parentId || '', isDeleted: false
 		}, { expand: 'user', requestKey: null });
 		const comment = toComment(r);
-		// Trigger notification (fire-and-forget)
 		try {
 			const commenterName = r.expand?.user?.name || r.expand?.user?.email || 'Someone';
 			const collection = contentType === 'textbook' ? 'textbooks' : 'flashcard_categories';
@@ -144,27 +119,16 @@ export async function createComment(
 }
 
 export async function updateComment(id: string, text: string): Promise<void> {
-	try {
-		await pb.collection('content_comments').update(id, { text });
-	} catch (e) {
+	try { await pb.collection('content_comments').update(id, { text }); }
+	catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
 		throw e;
 	}
 }
 
 export async function softDeleteComment(id: string): Promise<void> {
-	try {
-		await pb.collection('content_comments').update(id, { isDeleted: true });
-	} catch (e) {
-		if (e instanceof ClientResponseError) throw new Error(e.message);
-		throw e;
-	}
-}
-
-export async function pinComment(id: string, pinned: boolean): Promise<void> {
-	try {
-		await pb.collection('content_comments').update(id, { isPinned: pinned });
-	} catch (e) {
+	try { await pb.collection('content_comments').update(id, { isDeleted: true }); }
+	catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
 		throw e;
 	}
@@ -176,9 +140,11 @@ export async function voteComment(commentId: string, vote: 1 | -1): Promise<void
 		const existing = await pb.collection('comment_votes').getFullList({
 			requestKey: null, filter: `user = "${uid}" && comment = "${commentId}"`
 		});
+		let finalVote: 1 | -1 | null = vote;
 		if (existing.length > 0) {
 			if ((existing[0].vote as number) === vote) {
 				await pb.collection('comment_votes').delete(existing[0].id as string);
+				finalVote = null;
 			} else {
 				await pb.collection('comment_votes').update(existing[0].id as string, { vote });
 			}
@@ -186,26 +152,26 @@ export async function voteComment(commentId: string, vote: 1 | -1): Promise<void
 			await pb.collection('comment_votes').create({ user: uid, comment: commentId, vote });
 		}
 
-		// Trigger upvote milestone notification when upvoting
-		if (vote === 1) {
+		// Trigger upvote milestone when upvoting (not toggling off)
+		if (vote === 1 && finalVote === 1) {
 			try {
-				const allVotes = await pb.collection('comment_votes').getFullList({
-					requestKey: null,
-					filter: `comment = "${commentId}" && vote = 1`,
-					fields: 'id'
-				});
-				const upvoteCount = allVotes.length;
-				const commentRecord = await pb.collection('content_comments').getOne(commentId, { requestKey: null, fields: 'user,contentId,contentType' });
-				const commentOwnerId = commentRecord.user as string;
+				const comment = await pb.collection('content_comments').getOne(commentId, { requestKey: null, fields: 'user,contentType,contentId' });
+				const commentOwnerId = comment.user as string;
 				if (commentOwnerId && commentOwnerId !== uid) {
-					const contentId = commentRecord.contentId as string;
-					const contentType = commentRecord.contentType as string;
-					const collection = contentType === 'textbook' ? 'textbooks' : 'flashcard_categories';
-					const content = await pb.collection(collection).getOne(contentId, { requestKey: null, fields: 'title,name,shareTitle' });
+					// Count total upvotes
+					const upvotes = await pb.collection('comment_votes').getList(1, 1, {
+						requestKey: null, filter: `comment = "${commentId}" && vote = 1`, fields: 'id'
+					});
+					const upvoteCount = upvotes.totalItems;
+					// Get content title
+					const ctype = comment.contentType as string;
+					const cid = comment.contentId as string;
+					const collection = ctype === 'textbook' ? 'textbooks' : 'flashcard_categories';
+					const content = await pb.collection(collection).getOne(cid, { requestKey: null, fields: 'title,name,shareTitle' });
 					const title = (content.shareTitle as string) || (content.title as string) || (content.name as string) || '';
-					triggerUpvoteMilestone(commentOwnerId, upvoteCount, title);
+					triggerCommentUpvoteMilestone(commentOwnerId, upvoteCount, title, ctype, cid);
 				}
-			} catch { /* milestone notifications never block */ }
+			} catch { /* milestone errors never block */ }
 		}
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);

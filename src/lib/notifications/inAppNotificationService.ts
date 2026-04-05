@@ -7,8 +7,8 @@ export type InAppNotificationType =
 	| 'comment_on_content'
 	| 'reply_to_comment'
 	| 'new_shared_content'
-	| 'comment_upvote_milestone'
-	| 'study_reminder';
+	| 'comment_like_milestone'
+	| 'comment_upvote_milestone';
 
 export interface InAppNotification {
 	id: string;
@@ -26,6 +26,7 @@ export interface InAppNotification {
 
 export const FOLLOWER_MILESTONES = [1, 10, 100, 1000, 10000];
 export const INSTALL_MILESTONES = [1, 10, 100, 1000, 10000];
+export const LIKE_MILESTONES = [1, 10, 100, 1000];
 export const UPVOTE_MILESTONES = [1, 10, 100, 1000];
 
 function toNotification(r: Record<string, unknown>): InAppNotification {
@@ -49,9 +50,7 @@ export async function getNotifications(): Promise<InAppNotification[]> {
 	if (!uid) return [];
 	try {
 		const records = await pb.collection('in_app_notifications').getFullList({
-			requestKey: null,
-			filter: `user = "${uid}"`,
-			sort: '-created'
+			requestKey: null, filter: `user = "${uid}"`, sort: '-created'
 		});
 		return records.map(toNotification);
 	} catch { return []; }
@@ -62,18 +61,15 @@ export async function getUnreadCount(): Promise<number> {
 	if (!uid) return 0;
 	try {
 		const result = await pb.collection('in_app_notifications').getList(1, 1, {
-			requestKey: null,
-			filter: `user = "${uid}" && isRead = false`,
-			fields: 'id'
+			requestKey: null, filter: `user = "${uid}" && isRead = false`, fields: 'id'
 		});
 		return result.totalItems;
 	} catch { return 0; }
 }
 
 export async function markAsRead(id: string): Promise<void> {
-	try {
-		await pb.collection('in_app_notifications').update(id, { isRead: true }, { requestKey: null });
-	} catch { /* silent */ }
+	try { await pb.collection('in_app_notifications').update(id, { isRead: true }, { requestKey: null }); }
+	catch { /* silent */ }
 }
 
 export async function markAllAsRead(): Promise<void> {
@@ -83,14 +79,35 @@ export async function markAllAsRead(): Promise<void> {
 		const unread = await pb.collection('in_app_notifications').getFullList({
 			requestKey: null, filter: `user = "${uid}" && isRead = false`, fields: 'id'
 		});
-		await Promise.all(unread.map((r) => pb.collection('in_app_notifications').update(r.id as string, { isRead: true }, { requestKey: null })));
+		await Promise.all(unread.map((r) =>
+			pb.collection('in_app_notifications').update(r.id as string, { isRead: true }, { requestKey: null })
+		));
 	} catch { /* silent */ }
 }
 
 export async function deleteNotification(id: string): Promise<void> {
+	try { await pb.collection('in_app_notifications').delete(id, { requestKey: null }); }
+	catch { /* silent */ }
+}
+
+/** Check if a milestone notification of this type + milestone count was already sent */
+async function milestoneAlreadySent(
+	userId: string,
+	type: InAppNotificationType,
+	milestoneCount: number
+): Promise<boolean> {
 	try {
-		await pb.collection('in_app_notifications').delete(id, { requestKey: null });
-	} catch { /* silent */ }
+		const countStr = milestoneCount.toLocaleString();
+		const records = await pb.collection('in_app_notifications').getList(1, 1, {
+			requestKey: null,
+			filter: `user = "${userId}" && type = "${type}"`,
+			fields: 'id,title'
+		});
+		// Check if any existing notification title contains this milestone number
+		return records.items.some((r) =>
+			(r.title as string).includes(countStr)
+		);
+	} catch { return false; }
 }
 
 async function createNotification(data: {
@@ -106,26 +123,32 @@ async function createNotification(data: {
 			relatedUserId: data.relatedUserId ?? '', relatedUserName: data.relatedUserName ?? '',
 			isRead: false
 		}, { requestKey: null });
-	} catch { /* fire-and-forget, never block */ }
+	} catch { /* fire-and-forget */ }
 }
 
 // ── Trigger functions (fire-and-forget) ──────────────────────────────────────
 
 export function triggerFollowMilestone(userId: string, followerCount: number): void {
 	if (!FOLLOWER_MILESTONES.includes(followerCount)) return;
-	createNotification({
-		user: userId, type: 'new_follower_milestone',
-		title: `🎉 You reached ${followerCount.toLocaleString()} follower${followerCount > 1 ? 's' : ''}!`,
-		body: 'Your content is growing in popularity.'
+	milestoneAlreadySent(userId, 'new_follower_milestone', followerCount).then((sent) => {
+		if (sent) return;
+		createNotification({
+			user: userId, type: 'new_follower_milestone',
+			title: `🎉 You reached ${followerCount.toLocaleString()} follower${followerCount > 1 ? 's' : ''}!`,
+			body: 'Your content is growing in popularity.'
+		});
 	});
 }
 
 export function triggerInstallMilestone(userId: string, installCount: number, contentTitle: string): void {
 	if (!INSTALL_MILESTONES.includes(installCount)) return;
-	createNotification({
-		user: userId, type: 'install_milestone',
-		title: `📥 "${contentTitle}" reached ${installCount.toLocaleString()} install${installCount > 1 ? 's' : ''}!`,
-		body: 'People love your content.'
+	milestoneAlreadySent(userId, 'install_milestone', installCount).then((sent) => {
+		if (sent) return;
+		createNotification({
+			user: userId, type: 'install_milestone',
+			title: `📥 "${contentTitle}" reached ${installCount.toLocaleString()} install${installCount > 1 ? 's' : ''}!`,
+			body: 'People love your content.'
+		});
 	});
 }
 
@@ -164,12 +187,31 @@ export function triggerNewContentNotification(
 	});
 }
 
-export function triggerUpvoteMilestone(
-	commentOwnerId: string, upvoteCount: number, contentTitle: string
+export function triggerCommentLikeMilestone(
+	commentOwnerId: string, likeCount: number, contentTitle: string
+): void {
+	if (!LIKE_MILESTONES.includes(likeCount)) return;
+	milestoneAlreadySent(commentOwnerId, 'comment_like_milestone', likeCount).then((sent) => {
+		if (sent) return;
+		createNotification({
+			user: commentOwnerId, type: 'comment_like_milestone',
+			title: `❤️ Your comment on "${contentTitle}" reached ${likeCount} like${likeCount > 1 ? 's' : ''}!`,
+		});
+	});
+}
+
+export function triggerCommentUpvoteMilestone(
+	commentOwnerId: string, upvoteCount: number, contentTitle: string,
+	contentType: string, contentId: string
 ): void {
 	if (!UPVOTE_MILESTONES.includes(upvoteCount)) return;
-	createNotification({
-		user: commentOwnerId, type: 'comment_upvote_milestone',
-		title: `⬆️ Your comment on "${contentTitle}" reached ${upvoteCount} upvote${upvoteCount > 1 ? 's' : ''}!`,
+	milestoneAlreadySent(commentOwnerId, 'comment_upvote_milestone', upvoteCount).then((sent) => {
+		if (sent) return;
+		createNotification({
+			user: commentOwnerId, type: 'comment_upvote_milestone',
+			title: `👍 Your comment on "${contentTitle}" reached ${upvoteCount} upvote${upvoteCount > 1 ? 's' : ''}!`,
+			relatedContentType: contentType,
+			relatedContentId: contentId
+		});
 	});
 }

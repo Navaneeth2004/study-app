@@ -16,19 +16,11 @@
 	let { isOpen, outputType, existingContent = '', onInsert, onClose }: Props = $props();
 
 	const OUTPUT_LABELS: Record<AIOutputType, string> = {
-		paragraph: 'Paragraph',
-		bullet_list: 'Bullet List',
-		table: 'Table',
-		flashcards: 'Flashcards'
+		paragraph: 'Paragraph', bullet_list: 'Bullet List', table: 'Table', flashcards: 'Flashcards'
 	};
-
 	const PROVIDER_LABELS: Record<AIProvider, string> = {
-		openai: 'OpenAI',
-		anthropic: 'Anthropic',
-		gemini: 'Gemini',
-		groq: 'Groq'
+		openai: 'OpenAI', anthropic: 'Anthropic', gemini: 'Gemini', groq: 'Groq'
 	};
-
 	const VISION_PROVIDERS: AIProvider[] = ['openai', 'anthropic', 'gemini'];
 
 	let availableProviders = $state<AIProvider[]>([]);
@@ -44,9 +36,10 @@
 	let error = $state('');
 	let showDiscardModal = $state(false);
 
-	const supportsVision = $derived(
-		selectedProvider !== null && VISION_PROVIDERS.includes(selectedProvider)
-	);
+	const supportsVision = $derived(selectedProvider !== null && VISION_PROVIDERS.includes(selectedProvider));
+
+	// Dirty = user typed a prompt OR there's a generated result
+	const isDirty = $derived(prompt.trim().length > 0 || result !== null);
 
 	onMount(() => {
 		availableProviders = getAvailableProviders();
@@ -54,74 +47,50 @@
 	});
 
 	function attemptClose() {
-		if (result) {
-			showDiscardModal = true;
-		} else {
-			onClose();
-		}
+		if (isDirty) { showDiscardModal = true; }
+		else { onClose(); }
 	}
 
 	async function handleGenerate() {
 		if (!selectedProvider || !prompt.trim()) return;
-		generating = true;
-		error = '';
-		result = null;
-		editableCards = [];
+		generating = true; error = ''; result = null; editableCards = [];
 		try {
 			result = await generateContent({
-				provider: selectedProvider,
-				apiKey: getKey(selectedProvider),
-				prompt: prompt.trim(),
-				existingContent: existingDraft.trim() || undefined,
+				provider: selectedProvider, apiKey: getKey(selectedProvider),
+				prompt: prompt.trim(), existingContent: existingDraft.trim() || undefined,
 				referenceImage: (imageBase64 && supportsVision) ? imageBase64 : undefined,
-				outputType,
-				flashcardCount: outputType === 'flashcards' ? flashcardCount : undefined
+				outputType, flashcardCount: outputType === 'flashcards' ? flashcardCount : undefined
 			});
 			if (result.outputType === 'flashcards') {
 				const cards = result.data.flashcards;
-				editableCards = Array.isArray(cards)
-					? (cards as Array<{ front_text: string; back_text: string }>).map((c) => ({ ...c }))
-					: [];
+				editableCards = Array.isArray(cards) ? (cards as Array<{ front_text: string; back_text: string }>).map((c) => ({ ...c })) : [];
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Generation failed.';
-		} finally {
-			generating = false;
-		}
+		} finally { generating = false; }
 	}
 
-	function removeCard(index: number) {
-		editableCards = editableCards.filter((_, i) => i !== index);
-	}
+	function removeCard(index: number) { editableCards = editableCards.filter((_, i) => i !== index); }
 
 	function handleImageChange(e: Event) {
 		const file = (e.target as HTMLInputElement).files?.[0];
 		if (!file) return;
 		const reader = new FileReader();
-		reader.onload = () => {
-			const dataUrl = reader.result as string;
-			imageBase64 = dataUrl.split(',')[1] ?? '';
-		};
+		reader.onload = () => { imageBase64 = (reader.result as string).split(',')[1] ?? ''; };
 		reader.readAsDataURL(file);
 	}
 
 	function handleInsert() {
 		if (!result) return;
-		if (result.outputType === 'flashcards') {
-			onInsert({ ...result, data: { flashcards: editableCards } });
-		} else {
-			onInsert(result);
-		}
+		if (result.outputType === 'flashcards') onInsert({ ...result, data: { flashcards: editableCards } });
+		else onInsert(result);
 		onClose();
 	}
 
-	const canInsert = $derived(
-		result !== null &&
-		(result.outputType !== 'flashcards' || editableCards.length > 0)
-	);
+	const canInsert = $derived(result !== null && (result.outputType !== 'flashcards' || editableCards.length > 0));
 </script>
 
-<!-- z-[60] so it sits above the AI modal (z-50) -->
+<!-- Discard guard — z-[60] sits above modal (z-50) -->
 <UnsavedChangesModal
 	isOpen={showDiscardModal}
 	saving={false}
@@ -134,70 +103,40 @@
 {#if isOpen}
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center p-4"
-		style="background: rgba(0,0,0,0.75);"
-		onclick={attemptClose}
-	>
+	<div class="fixed inset-0 z-50 flex items-center justify-center p-4"
+	     style="background: rgba(0,0,0,0.75);" onclick={attemptClose}>
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div
-			class="relative flex w-full max-w-xl flex-col rounded-2xl border
-			       border-[var(--color-surface-700)] bg-[var(--color-surface-950)] shadow-2xl"
-			style="max-height: 90vh;"
-			onclick={(e) => e.stopPropagation()}
-		>
-			<!-- Header -->
-			<div class="flex shrink-0 items-center justify-between border-b
-			            border-[var(--color-surface-700)] px-5 py-4">
+		<div class="relative flex w-full max-w-xl flex-col rounded-2xl border border-[var(--color-surface-700)] bg-[var(--color-surface-950)] shadow-2xl"
+		     style="max-height: 90vh;" onclick={(e) => e.stopPropagation()}>
+			<div class="flex shrink-0 items-center justify-between border-b border-[var(--color-surface-700)] px-5 py-4">
 				<div class="flex flex-col gap-0.5">
 					<span class="text-sm font-semibold text-[var(--color-text-primary)]">Generate with AI</span>
-					<span class="text-xs text-[var(--color-text-muted)]">
-						Generating: {OUTPUT_LABELS[outputType]}
-					</span>
+					<span class="text-xs text-[var(--color-text-muted)]">Generating: {OUTPUT_LABELS[outputType]}</span>
 				</div>
-				<button
-					onclick={attemptClose}
-					aria-label="Close"
-					class="flex h-7 w-7 items-center justify-center rounded-lg
-					       text-[var(--color-text-muted)] hover:bg-[var(--color-surface-800)]
-					       hover:text-[var(--color-text-primary)] transition-colors"
-				>
+				<button onclick={attemptClose} aria-label="Close"
+					class="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-800)] hover:text-[var(--color-text-primary)] transition-colors">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
 						<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
 					</svg>
 				</button>
 			</div>
 
-			<!-- Scrollable body -->
 			<div class="flex flex-col gap-4 overflow-y-auto p-5">
-
 				{#if availableProviders.length === 0}
-					<div class="rounded-xl border border-[var(--color-surface-700)]
-					            bg-[var(--color-surface-900)] px-4 py-6 text-center">
+					<div class="rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] px-4 py-6 text-center">
 						<p class="mb-2 text-sm text-[var(--color-text-secondary)]">No API keys configured.</p>
-						<a
-							href="/settings"
-							onclick={onClose}
-							class="text-sm text-[var(--color-accent-400)] hover:text-[var(--color-accent-300)] transition-colors"
-						>
-							Add an API key in Settings → AI Settings
-						</a>
+						<a href="/settings" onclick={onClose} class="text-sm text-[var(--color-accent-400)] hover:text-[var(--color-accent-300)] transition-colors">Add an API key in Settings → AI Settings</a>
 					</div>
-
 				{:else}
 					<!-- Provider selector -->
 					<div class="flex flex-col gap-1.5">
 						<span class="text-xs font-medium text-[var(--color-text-secondary)]">Provider</span>
 						<div class="flex flex-wrap gap-2">
 							{#each availableProviders as p}
-								<button
-									onclick={() => (selectedProvider = p)}
+								<button onclick={() => (selectedProvider = p)}
 									class="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors
-									       {selectedProvider === p
-										? 'border-[var(--color-accent-500)] bg-[var(--color-accent-500)]/10 text-[var(--color-accent-400)]'
-										: 'border-[var(--color-surface-600)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}"
-								>
+									       {selectedProvider === p ? 'border-[var(--color-accent-500)] bg-[var(--color-accent-500)]/10 text-[var(--color-accent-400)]' : 'border-[var(--color-surface-600)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'}">
 									{PROVIDER_LABELS[p]}
 								</button>
 							{/each}
@@ -207,60 +146,30 @@
 					<!-- Prompt -->
 					<div class="flex flex-col gap-1.5">
 						<label class="text-xs font-medium text-[var(--color-text-secondary)]">Prompt</label>
-						<textarea
-							bind:value={prompt}
-							placeholder="Describe what you want to generate…"
-							rows={3}
-							class="w-full resize-none rounded-xl border border-[var(--color-surface-600)]
-							       bg-[var(--color-surface-800)] px-3 py-2 text-sm
-							       text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]
-							       focus:border-[var(--color-accent-500)] focus:outline-none
-							       focus:ring-2 focus:ring-[var(--color-accent-500)]/20 transition-colors"
-						></textarea>
+						<textarea bind:value={prompt} placeholder="Describe what you want to generate…" rows={3}
+							class="w-full resize-none rounded-xl border border-[var(--color-surface-600)] bg-[var(--color-surface-800)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-500)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-500)]/20 transition-colors"></textarea>
 					</div>
 
-					<!-- Flashcard count -->
 					{#if outputType === 'flashcards'}
 						<div class="flex flex-col gap-1.5">
 							<label class="text-xs font-medium text-[var(--color-text-secondary)]">How many cards?</label>
-							<input
-								type="number"
-								bind:value={flashcardCount}
-								min={1}
-								max={50}
-								class="w-24 rounded-xl border border-[var(--color-surface-600)]
-								       bg-[var(--color-surface-800)] px-3 py-2 text-sm
-								       text-[var(--color-text-primary)] focus:border-[var(--color-accent-500)]
-								       focus:outline-none transition-colors"
-							/>
+							<input type="number" bind:value={flashcardCount} min={1} max={50}
+								class="w-24 rounded-xl border border-[var(--color-surface-600)] bg-[var(--color-surface-800)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-accent-500)] focus:outline-none transition-colors" />
 						</div>
 					{/if}
 
 					<!-- Existing content -->
 					<div class="flex flex-col gap-1.5">
-						<button
-							type="button"
-							onclick={() => (showExisting = !showExisting)}
-							class="flex items-center gap-1.5 self-start text-xs
-							       text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
-						>
+						<button type="button" onclick={() => (showExisting = !showExisting)}
+							class="flex items-center gap-1.5 self-start text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-								{#if showExisting}<polyline points="18 15 12 9 6 15"/>
-								{:else}<polyline points="6 9 12 15 18 9"/>{/if}
+								{#if showExisting}<polyline points="18 15 12 9 6 15"/>{:else}<polyline points="6 9 12 15 18 9"/>{/if}
 							</svg>
 							Existing content to rewrite
 						</button>
 						{#if showExisting}
-							<textarea
-								bind:value={existingDraft}
-								placeholder="Paste existing content here…"
-								rows={3}
-								class="w-full resize-none rounded-xl border border-[var(--color-surface-600)]
-								       bg-[var(--color-surface-800)] px-3 py-2 text-sm
-								       text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]
-								       focus:border-[var(--color-accent-500)] focus:outline-none
-								       focus:ring-2 focus:ring-[var(--color-accent-500)]/20 transition-colors"
-							></textarea>
+							<textarea bind:value={existingDraft} placeholder="Paste existing content here…" rows={3}
+								class="w-full resize-none rounded-xl border border-[var(--color-surface-600)] bg-[var(--color-surface-800)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent-500)] focus:outline-none transition-colors"></textarea>
 						{/if}
 					</div>
 
@@ -268,34 +177,17 @@
 					<div class="flex flex-col gap-1.5">
 						{#if imageBase64}
 							<div class="flex items-start gap-3">
-								<img
-									src="data:image/jpeg;base64,{imageBase64}"
-									alt="Reference"
-									class="h-14 w-14 shrink-0 rounded-lg border border-[var(--color-surface-700)] object-cover"
-								/>
+								<img src="data:image/jpeg;base64,{imageBase64}" alt="Reference" class="h-14 w-14 shrink-0 rounded-lg border border-[var(--color-surface-700)] object-cover" />
 								<div class="flex flex-col gap-1">
 									<span class="text-xs text-[var(--color-text-secondary)]">Reference image attached</span>
-									{#if !supportsVision}
-										<span class="text-xs text-[var(--color-warning-500)]">
-											⚠ {PROVIDER_LABELS[selectedProvider!]} cannot see images. Switch to OpenAI, Anthropic, or Gemini.
-										</span>
-									{/if}
-									<button
-										type="button"
-										onclick={() => (imageBase64 = '')}
-										class="self-start text-xs text-[var(--color-text-muted)] hover:text-[var(--color-error-400)] transition-colors"
-									>
-										Remove
-									</button>
+									{#if !supportsVision}<span class="text-xs text-[var(--color-warning-500)]">⚠ {PROVIDER_LABELS[selectedProvider!]} cannot see images.</span>{/if}
+									<button type="button" onclick={() => (imageBase64 = '')} class="self-start text-xs text-[var(--color-text-muted)] hover:text-[var(--color-error-400)] transition-colors">Remove</button>
 								</div>
 							</div>
 						{:else}
-							<label class="flex cursor-pointer items-center gap-1.5 self-start text-xs
-							              text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
+							<label class="flex cursor-pointer items-center gap-1.5 self-start text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
 								<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-									<rect x="3" y="3" width="18" height="18" rx="2"/>
-									<circle cx="8.5" cy="8.5" r="1.5"/>
-									<polyline points="21 15 16 10 5 21"/>
+									<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
 								</svg>
 								Attach reference image
 								<input type="file" accept="image/*" onchange={handleImageChange} class="hidden" />
@@ -304,106 +196,51 @@
 					</div>
 
 					<!-- Generate button -->
-					<button
-						type="button"
-						onclick={handleGenerate}
-						disabled={generating || !prompt.trim() || !selectedProvider}
-						class="flex items-center justify-center gap-2 rounded-xl bg-[var(--color-accent-500)]
-						       px-4 py-2.5 text-sm font-medium text-white hover:bg-[var(--color-accent-400)]
-						       disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
-					>
+					<button type="button" onclick={handleGenerate} disabled={generating || !prompt.trim() || !selectedProvider}
+						class="flex items-center justify-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-2.5 text-sm font-medium text-white hover:bg-[var(--color-accent-400)] disabled:cursor-not-allowed disabled:opacity-50 transition-colors">
 						{#if generating}
-							<svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-								<path d="M21 12a9 9 0 11-6.219-8.56"/>
-							</svg>
+							<svg class="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
 							Generating…
-						{:else if result}
-							Regenerate
-						{:else}
-							Generate
-						{/if}
+						{:else if result}Regenerate{:else}Generate{/if}
 					</button>
 
-					{#if error}
-						<p class="text-sm text-[var(--color-error-400)]">{error}</p>
-					{/if}
+					{#if error}<p class="text-sm text-[var(--color-error-400)]">{error}</p>{/if}
 
-					<!-- Result preview -->
 					{#if result}
-						<div class="flex flex-col gap-3 rounded-xl border border-[var(--color-surface-700)]
-						            bg-[var(--color-surface-900)] p-4">
+						<div class="flex flex-col gap-3 rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] p-4">
 							<span class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">Preview</span>
 
 							{#if result.outputType === 'paragraph'}
-								<p class="text-sm leading-relaxed text-[var(--color-text-primary)]">
-									{@html String(result.data.html ?? '')}
-								</p>
-
+								<p class="text-sm leading-relaxed text-[var(--color-text-primary)]">{@html String(result.data.html ?? '')}</p>
 							{:else if result.outputType === 'bullet_list'}
 								<ul class="flex flex-col gap-1.5">
 									{#each (result.data.items as string[] ?? []) as item}
 										<li class="flex items-start gap-2 text-sm text-[var(--color-text-primary)]">
-											<span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent-500)]"></span>
-											{item}
+											<span class="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent-500)]"></span>{item}
 										</li>
 									{/each}
 								</ul>
-
 							{:else if result.outputType === 'table'}
 								<div class="overflow-x-auto">
 									<table class="w-full text-sm">
-										<thead>
-											<tr>
-												{#each (result.data.headers as string[] ?? []) as h}
-													<th class="border-b border-[var(--color-surface-700)] px-3 py-1.5 text-left
-													           text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">
-														{h}
-													</th>
-												{/each}
-											</tr>
-										</thead>
-										<tbody>
-											{#each (result.data.rows as string[][] ?? []) as row}
-												<tr>
-													{#each row as cell}
-														<td class="border-b border-[var(--color-surface-700)]/50 px-3 py-1.5 text-[var(--color-text-primary)]">
-															{cell}
-														</td>
-													{/each}
-												</tr>
-											{/each}
-										</tbody>
+										<thead><tr>{#each (result.data.headers as string[] ?? []) as h}<th class="border-b border-[var(--color-surface-700)] px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">{h}</th>{/each}</tr></thead>
+										<tbody>{#each (result.data.rows as string[][] ?? []) as row}<tr>{#each row as cell}<td class="border-b border-[var(--color-surface-700)]/50 px-3 py-1.5 text-[var(--color-text-primary)]">{cell}</td>{/each}</tr>{/each}</tbody>
 									</table>
 								</div>
-
 							{:else if result.outputType === 'flashcards'}
 								<div class="flex items-center justify-between">
-									<p class="text-xs text-[var(--color-text-muted)]">
-										{editableCards.length} {editableCards.length !== 1 ? 'cards' : 'card'}
-									</p>
-									{#if editableCards.length === 0}
-										<p class="text-xs text-[var(--color-error-400)]">All cards removed</p>
-									{/if}
+									<p class="text-xs text-[var(--color-text-muted)]">{editableCards.length} {editableCards.length !== 1 ? 'cards' : 'card'}</p>
+									{#if editableCards.length === 0}<p class="text-xs text-[var(--color-error-400)]">All cards removed</p>{/if}
 								</div>
 								<div class="flex max-h-52 flex-col gap-2 overflow-y-auto">
 									{#each editableCards as card, i (i)}
-										<div class="group flex items-start gap-3 rounded-lg border border-[var(--color-surface-700)]
-										            bg-[var(--color-surface-800)] px-3 py-2">
+										<div class="group flex items-start gap-3 rounded-lg border border-[var(--color-surface-700)] bg-[var(--color-surface-800)] px-3 py-2">
 											<div class="flex flex-1 flex-col gap-0.5 min-w-0">
-												<p class="text-xs text-[var(--color-text-secondary)]">
-													<span class="text-[var(--color-text-muted)]">Front:</span> {card.front_text}
-												</p>
-												<p class="text-xs text-[var(--color-text-secondary)]">
-													<span class="text-[var(--color-text-muted)]">Back:</span> {card.back_text}
-												</p>
+												<p class="text-xs text-[var(--color-text-secondary)]"><span class="text-[var(--color-text-muted)]">Front:</span> {card.front_text}</p>
+												<p class="text-xs text-[var(--color-text-secondary)]"><span class="text-[var(--color-text-muted)]">Back:</span> {card.back_text}</p>
 											</div>
-											<button
-												type="button"
-												onclick={() => removeCard(i)}
-												aria-label="Remove card"
-												class="mt-0.5 shrink-0 text-[var(--color-text-muted)] opacity-0
-												       group-hover:opacity-100 hover:text-[var(--color-error-400)] transition-all"
-											>
+											<button type="button" onclick={() => removeCard(i)} aria-label="Remove card"
+												class="mt-0.5 shrink-0 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--color-error-400)] transition-all">
 												<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
 													<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
 												</svg>
@@ -413,14 +250,8 @@
 								</div>
 							{/if}
 
-							<button
-								type="button"
-								onclick={handleInsert}
-								disabled={!canInsert}
-								class="self-start rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm
-								       font-medium text-white hover:bg-[var(--color-accent-400)]
-								       disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
-							>
+							<button type="button" onclick={handleInsert} disabled={!canInsert}
+								class="self-start rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-400)] disabled:cursor-not-allowed disabled:opacity-50 transition-colors">
 								Insert
 							</button>
 						</div>
