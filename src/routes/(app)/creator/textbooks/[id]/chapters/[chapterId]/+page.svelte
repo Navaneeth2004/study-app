@@ -21,6 +21,7 @@
 	import DividerBlockEditor from '$lib/creator/components/blocks/DividerBlockEditor.svelte';
 	import CalloutBlockEditor from '$lib/creator/components/blocks/CalloutBlockEditor.svelte';
 	import VideoBlockEditor from '$lib/creator/components/blocks/VideoBlockEditor.svelte';
+	import QuoteBlockEditor from '$lib/creator/components/blocks/QuoteBlockEditor.svelte';
 	import TitleBlockRenderer from '$lib/viewer/components/blocks/TitleBlockRenderer.svelte';
 	import SubtitleBlockRenderer from '$lib/viewer/components/blocks/SubtitleBlockRenderer.svelte';
 	import ParagraphBlockRenderer from '$lib/viewer/components/blocks/ParagraphBlockRenderer.svelte';
@@ -31,6 +32,7 @@
 	import DividerBlockRenderer from '$lib/viewer/components/blocks/DividerBlockRenderer.svelte';
 	import CalloutBlockRenderer from '$lib/viewer/components/blocks/CalloutBlockRenderer.svelte';
 	import VideoBlockRenderer from '$lib/viewer/components/blocks/VideoBlockRenderer.svelte';
+	import QuoteBlockRenderer from '$lib/viewer/components/blocks/QuoteBlockRenderer.svelte';
 	import UnsavedChangesModal from '$lib/shared/components/UnsavedChangesModal.svelte';
 	import AIGenerationModal from '$lib/shared/components/AIGenerationModal.svelte';
 	import type { RuntimeBlock, BlockType } from '$lib/creator/contentTypes';
@@ -50,15 +52,15 @@
 	let showUnsavedModal = $state(false);
 	let pendingHref = $state('');
 	let draggingId = $state<string | null>(null);
-
-	// Per-block collapse state
 	let collapsedBlocks = $state<Set<string>>(new Set());
+
+	// Copy/paste clipboard (stored in module-level variable so it persists across chapters)
+	let clipboardNotice = $state<string | null>(null);
 
 	// AI state
 	let showAIPicker = $state(false);
 	let aiOutputType = $state<AIOutputType>('paragraph');
 	let showAIModal = $state(false);
-	// Track insertion index for "Add below"
 	let aiInsertAfterIndex = $state<number | null>(null);
 
 	const AI_OUTPUT_TYPES: { type: AIOutputType; label: string }[] = [
@@ -117,28 +119,15 @@
 		chapterTitle = value;
 	}
 
-	/** Add a block at a specific position (index = insert after this index, -1 = at end) */
 	async function handleAddBlock(type: BlockType, afterIndex?: number) {
 		try {
-			// Determine insertion position
 			const insertAt = afterIndex !== undefined && afterIndex >= 0 ? afterIndex + 1 : blocks.length;
-
-			// Create block at the end first (PocketBase order), then reorder
 			const block = await createBlock(chapterId, type, blocks.length + 1);
-
-			// Insert into the local array at the right position
 			const newBlocks = [...blocks];
 			newBlocks.splice(insertAt, 0, block);
-
-			// Re-assign orders
-			const reordered = newBlocks.map((b, i) => ({ ...b, order: i + 1 }));
-			blocks = reordered;
+			blocks = newBlocks.map((b, i) => ({ ...b, order: i + 1 }));
 			isDirty = true;
-
-			// Persist the new order if we inserted mid-list
-			if (insertAt < blocks.length - 1) {
-				await reorderBlocks(blocks);
-			}
+			if (insertAt < blocks.length - 1) await reorderBlocks(blocks);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not add block.';
 		}
@@ -173,9 +162,7 @@
 		e.dataTransfer?.setData('text/plain', id);
 	}
 
-	function handleDragEnd() {
-		draggingId = null;
-	}
+	function handleDragEnd() { draggingId = null; }
 
 	async function handleDrop(e: DragEvent, targetId: string) {
 		e.preventDefault();
@@ -197,6 +184,44 @@
 		if (next.has(blockId)) next.delete(blockId);
 		else next.add(blockId);
 		collapsedBlocks = next;
+	}
+
+	// --- Copy / Paste ---
+	// Use localStorage to persist clipboard across chapters/sessions
+	function copyBlock(block: RuntimeBlock) {
+		const payload = { type: block.type, data: block.data };
+		try {
+			localStorage.setItem('studyapp_block_clipboard', JSON.stringify(payload));
+			clipboardNotice = `Copied "${block.type}" block`;
+			setTimeout(() => (clipboardNotice = null), 2000);
+		} catch { /* ignore */ }
+	}
+
+	async function pasteBlock(afterIndex?: number) {
+		try {
+			const raw = localStorage.getItem('studyapp_block_clipboard');
+			if (!raw) return;
+			const { type, data } = JSON.parse(raw) as { type: BlockType; data: Record<string, unknown> };
+			const insertAt = afterIndex !== undefined && afterIndex >= 0 ? afterIndex + 1 : blocks.length;
+			const block = await createBlock(chapterId, type, blocks.length + 1);
+			// immediately queue the data update so content is saved
+			pendingData.set(block.id, data);
+			const newBlock = { ...block, data } as RuntimeBlock;
+			const newBlocks = [...blocks];
+			newBlocks.splice(insertAt, 0, newBlock);
+			blocks = newBlocks.map((b, i) => ({ ...b, order: i + 1 }));
+			isDirty = true;
+			if (insertAt < blocks.length - 1) await reorderBlocks(blocks);
+			clipboardNotice = 'Pasted!';
+			setTimeout(() => (clipboardNotice = null), 1500);
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Could not paste block.';
+		}
+	}
+
+	function hasClipboard(): boolean {
+		try { return !!localStorage.getItem('studyapp_block_clipboard'); }
+		catch { return false; }
 	}
 
 	async function handleAIInsert(result: AIGenerationResult) {
@@ -227,6 +252,12 @@
 
 {#if showAIModal}
 	<AIGenerationModal isOpen={true} outputType={aiOutputType} onInsert={handleAIInsert} onClose={() => (showAIModal = false)} />
+{/if}
+
+{#if clipboardNotice}
+	<div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-xl bg-[var(--color-surface-800)] border border-[var(--color-surface-600)] px-4 py-2 text-sm text-[var(--color-text-secondary)] shadow-xl pointer-events-none">
+		{clipboardNotice}
+	</div>
 {/if}
 
 {#if loading}
@@ -261,9 +292,7 @@
 			<div class="flex shrink-0 items-center gap-2">
 				{#if !previewMode}
 					<button onclick={() => (previewMode = true)}
-						class="rounded-lg border border-[var(--color-surface-600)] px-3 py-1.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">
-						Preview
-					</button>
+						class="rounded-lg border border-[var(--color-surface-600)] px-3 py-1.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">Preview</button>
 					<button onclick={saveAll} disabled={saving || !isDirty}
 						class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors
 						       {isDirty ? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)]' : 'text-[var(--color-text-muted)] cursor-default'}">
@@ -297,6 +326,7 @@
 						{:else if block.type === 'divider'}<DividerBlockRenderer />
 						{:else if block.type === 'callout'}<CalloutBlockRenderer data={block.data} />
 						{:else if block.type === 'video'}<VideoBlockRenderer data={block.data} />
+						{:else if block.type === 'quote'}<QuoteBlockRenderer data={block.data} />
 						{/if}
 					</div>
 				{:else}
@@ -308,6 +338,8 @@
 						onToggleCollapse={() => toggleCollapse(block.id)}
 						onDelete={() => handleDeleteBlock(block.id)}
 						onAddBelow={(type) => handleAddBlock(type, blockIndex)}
+						onCopy={() => copyBlock(block)}
+						onPaste={() => pasteBlock(blockIndex)}
 						onDragStart={handleDragStart}
 						onDragEnd={handleDragEnd}
 						onDrop={handleDrop}
@@ -333,6 +365,8 @@
 							<CalloutBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
 						{:else if block.type === 'video'}
 							<VideoBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
+						{:else if block.type === 'quote'}
+							<QuoteBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
 						{/if}
 					</BlockWrapper>
 				{/if}
@@ -342,7 +376,7 @@
 		{#if !previewMode}
 			<BlockTypePicker onSelect={(type) => handleAddBlock(type)} />
 
-			<!-- AI block generator at bottom -->
+			<!-- AI generator -->
 			<div class="relative">
 				<button onclick={() => (showAIPicker = !showAIPicker)}
 					class="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--color-surface-600)] px-4 py-3 text-sm text-[var(--color-text-muted)] hover:border-[var(--color-accent-500)] hover:text-[var(--color-accent-400)] transition-colors">

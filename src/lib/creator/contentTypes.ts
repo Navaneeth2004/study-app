@@ -55,6 +55,11 @@ export interface VideoBlock extends BlockBase {
 	data: { url: string; description: string };
 }
 
+export interface QuoteBlock extends BlockBase {
+	type: 'quote';
+	data: { text: string; attribution: string };
+}
+
 export type BlockType =
 	| 'title'
 	| 'subtitle'
@@ -65,7 +70,8 @@ export type BlockType =
 	| 'audio'
 	| 'divider'
 	| 'callout'
-	| 'video';
+	| 'video'
+	| 'quote';
 
 export type ChapterBlock =
 	| TitleBlock
@@ -77,11 +83,12 @@ export type ChapterBlock =
 	| AudioBlock
 	| DividerBlock
 	| CalloutBlock
-	| VideoBlock;
+	| VideoBlock
+	| QuoteBlock;
 
 export type BlockData = ChapterBlock['data'];
 
-// Used in pages where block data is handled generically (renderers/editors accept Record<string, unknown>)
+// Used in pages where block data is handled generically
 export interface RuntimeBlock {
 	id: string;
 	chapter: string;
@@ -101,7 +108,8 @@ export const BLOCK_TYPE_LABELS: Record<BlockType, string> = {
 	audio: 'Audio',
 	divider: 'Divider',
 	callout: 'Callout',
-	video: 'Video'
+	video: 'Video',
+	quote: 'Quote'
 };
 
 export function defaultBlockData(type: BlockType): ChapterBlock['data'] {
@@ -125,5 +133,7 @@ export function defaultBlockData(type: BlockType): ChapterBlock['data'] {
 			return { variant: 'info', text: '' };
 		case 'video':
 			return { url: '', description: '' };
+		case 'quote':
+			return { text: '', attribution: '' };
 	}
 }
