@@ -30,6 +30,7 @@
 	let isShared = $state(false);
 	let installId = $state<string | null>(null);
 	let installing = $state(false);
+
 	let showForkModal = $state(false);
 	let forkRunning = $state(false);
 	let forkProgress = $state<ForkProgress | null>(null);
@@ -54,7 +55,8 @@
 			isOwnContent = (r.owner as string) === user?.id || isFork;
 			if (!isOwnContent && user?.id) {
 				const iid = await checkInstalled(textbookId);
-				installId = iid; isInstalled = !!iid;
+				installId = iid;
+				isInstalled = !!iid;
 			}
 			chapters = await listChapters(textbookId);
 		} catch (e) {
@@ -86,7 +88,9 @@
 
 <svelte:head><title>{textbook?.title ?? 'Textbook'} — StudyApp</title></svelte:head>
 
-<ForkModal isOpen={showForkModal} contentType="textbook" originalTitle={textbook?.title ?? ''} originalAuthor={authorName} onConfirm={handleForkConfirm} onClose={() => (showForkModal = false)} />
+<ForkModal isOpen={showForkModal} contentType="textbook"
+	originalTitle={textbook?.title ?? ''} originalAuthor={authorName}
+	onConfirm={handleForkConfirm} onClose={() => (showForkModal = false)} />
 <ForkProgressModal isOpen={forkRunning} progress={forkProgress} error={forkError} onDone={handleForkDone} />
 
 <div class="flex flex-col gap-6 max-w-2xl">
@@ -123,20 +127,29 @@
 				</p>
 				<div class="flex shrink-0 items-center gap-2">
 					{#if isInstalled}
-						<button onclick={() => (showForkModal = true)} class="flex items-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-400)] transition-colors">
+						<button onclick={() => (showForkModal = true)}
+							class="flex items-center gap-2 rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-400)] transition-colors">
 							<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/><path d="M12 7v4M6 17v-2a4 4 0 014-4h4a4 4 0 014 4v2"/></svg>
 							Duplicate
 						</button>
-						<button onclick={handleUninstall} disabled={installing} class="rounded-xl border border-[var(--color-surface-600)] px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-error-400)] disabled:opacity-50 transition-colors">{installing ? '…' : 'Remove'}</button>
+						<button onclick={handleUninstall} disabled={installing}
+							class="rounded-xl border border-[var(--color-surface-600)] px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-error-400)] disabled:opacity-50 transition-colors">
+							{installing ? '…' : 'Remove'}
+						</button>
 					{:else}
-						<button onclick={handleInstall} disabled={installing} class="rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-400)] disabled:opacity-50 transition-colors">{installing ? 'Installing…' : 'Get'}</button>
+						<button onclick={handleInstall} disabled={installing}
+							class="rounded-xl bg-[var(--color-accent-500)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-400)] disabled:opacity-50 transition-colors">
+							{installing ? 'Installing…' : 'Get'}
+						</button>
 					{/if}
 				</div>
 			</div>
 		{/if}
 
 		<section class="flex flex-col gap-3">
-			<h2 class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">{chapters.length} {chapters.length === 1 ? 'Chapter' : 'Chapters'}</h2>
+			<h2 class="text-xs font-semibold uppercase tracking-widest text-[var(--color-text-muted)]">
+				{chapters.length} {chapters.length === 1 ? 'Chapter' : 'Chapters'}
+			</h2>
 			{#if chapters.length === 0}
 				<EmptyState heading="No chapters yet" description="This textbook has no chapters yet." />
 			{:else}

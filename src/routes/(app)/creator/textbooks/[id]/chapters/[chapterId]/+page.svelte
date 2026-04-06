@@ -51,9 +51,15 @@
 	let pendingHref = $state('');
 	let draggingId = $state<string | null>(null);
 
+	// Per-block collapse state
+	let collapsedBlocks = $state<Set<string>>(new Set());
+
+	// AI state
 	let showAIPicker = $state(false);
 	let aiOutputType = $state<AIOutputType>('paragraph');
 	let showAIModal = $state(false);
+	// Track insertion index for "Add below"
+	let aiInsertAfterIndex = $state<number | null>(null);
 
 	const AI_OUTPUT_TYPES: { type: AIOutputType; label: string }[] = [
 		{ type: 'paragraph', label: 'Paragraph' },
@@ -64,42 +70,46 @@
 	const pendingData = new Map<string, Record<string, unknown>>();
 
 	onMount(async () => {
-		loading = true; error = '';
+		loading = true;
+		error = '';
 		try {
 			const [textbook, chapter, fetched] = await Promise.all([
-				getTextbook(textbookId), getChapter(chapterId), listBlocks(chapterId)
+				getTextbook(textbookId),
+				getChapter(chapterId),
+				listBlocks(chapterId)
 			]);
 			textbookTitle = textbook.title;
 			chapterTitle = chapter.title;
-			// Normalize order on load to ensure no gaps
-			blocks = fetched.map((b, i) => ({ ...b, order: i + 1 })) as RuntimeBlock[];
+			blocks = fetched as RuntimeBlock[];
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not load chapter.';
-		} finally { loading = false; }
+		} finally {
+			loading = false;
+		}
 	});
 
 	beforeNavigate(({ cancel, to }) => {
-		if (isDirty && to) { cancel(); pendingHref = to.url.href; showUnsavedModal = true; }
+		if (isDirty && to) {
+			cancel();
+			pendingHref = to.url.href;
+			showUnsavedModal = true;
+		}
 	});
 
-	/** Persist pending data changes AND current block order */
 	async function saveAll() {
-		saving = true; error = '';
+		saving = true;
+		error = '';
 		try {
-			// Save content changes
-			const dataWrites = Array.from(pendingData.entries()).map(([id, data]) => updateBlock(id, data));
-			// Always persist current order to prevent drift
-			const orderWrites = blocks.map((b, i) =>
-				import('$lib/shared/pocketbase').then(({ pb }) =>
-					pb.collection('chapter_blocks').update(b.id, { order: i + 1 }, { requestKey: null })
-				)
+			await Promise.all(
+				Array.from(pendingData.entries()).map(([id, data]) => updateBlock(id, data))
 			);
-			await Promise.all([...dataWrites, ...orderWrites]);
 			pendingData.clear();
 			isDirty = false;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not save.';
-		} finally { saving = false; }
+		} finally {
+			saving = false;
+		}
 	}
 
 	async function handleTitleSave(value: string) {
@@ -107,15 +117,28 @@
 		chapterTitle = value;
 	}
 
-	async function handleAddBlock(type: BlockType) {
+	/** Add a block at a specific position (index = insert after this index, -1 = at end) */
+	async function handleAddBlock(type: BlockType, afterIndex?: number) {
 		try {
-			// Use current blocks length + 1 as order
-			const order = blocks.length + 1;
-			const block = await createBlock(chapterId, type, order);
-			blocks = [...blocks, { ...block, order }];
-			// Immediately persist order for all blocks to prevent gaps
-			await persistOrder(blocks);
+			// Determine insertion position
+			const insertAt = afterIndex !== undefined && afterIndex >= 0 ? afterIndex + 1 : blocks.length;
+
+			// Create block at the end first (PocketBase order), then reorder
+			const block = await createBlock(chapterId, type, blocks.length + 1);
+
+			// Insert into the local array at the right position
+			const newBlocks = [...blocks];
+			newBlocks.splice(insertAt, 0, block);
+
+			// Re-assign orders
+			const reordered = newBlocks.map((b, i) => ({ ...b, order: i + 1 }));
+			blocks = reordered;
 			isDirty = true;
+
+			// Persist the new order if we inserted mid-list
+			if (insertAt < blocks.length - 1) {
+				await reorderBlocks(blocks);
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not add block.';
 		}
@@ -124,7 +147,7 @@
 	function handleBlockUpdate(blockId: string, data: Record<string, unknown>) {
 		const existing = blocks.find((b) => b.id === blockId);
 		if (existing && JSON.stringify(existing.data) === JSON.stringify(data)) return;
-		blocks = blocks.map((b) => b.id === blockId ? { ...b, data } as RuntimeBlock : b);
+		blocks = blocks.map((b) => (b.id === blockId ? { ...b, data } as RuntimeBlock : b));
 		pendingData.set(blockId, data);
 		isDirty = true;
 	}
@@ -134,8 +157,7 @@
 			await deleteBlock(blockId);
 			blocks = blocks.filter((b) => b.id !== blockId);
 			pendingData.delete(blockId);
-			// Re-persist order after deletion to close the gap
-			await persistOrder(blocks);
+			collapsedBlocks.delete(blockId);
 			isDirty = true;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not delete block.';
@@ -151,6 +173,10 @@
 		e.dataTransfer?.setData('text/plain', id);
 	}
 
+	function handleDragEnd() {
+		draggingId = null;
+	}
+
 	async function handleDrop(e: DragEvent, targetId: string) {
 		e.preventDefault();
 		if (!draggingId || draggingId === targetId) { draggingId = null; return; }
@@ -159,33 +185,32 @@
 		const reordered = [...blocks];
 		const [moved] = reordered.splice(fromIndex, 1);
 		reordered.splice(toIndex, 0, moved);
-		// Assign clean sequential orders
 		blocks = reordered.map((b, i) => ({ ...b, order: i + 1 })) as RuntimeBlock[];
 		draggingId = null;
 		isDirty = true;
-		try { await persistOrder(blocks); }
+		try { await reorderBlocks(blocks); }
 		catch (e) { error = e instanceof Error ? e.message : 'Could not reorder.'; }
 	}
 
-	/** Write sequential order 1..N to DB for all blocks */
-	async function persistOrder(currentBlocks: RuntimeBlock[]) {
-		const { pb } = await import('$lib/shared/pocketbase');
-		await Promise.all(
-			currentBlocks.map((b, i) =>
-				pb.collection('chapter_blocks').update(b.id, { order: i + 1 }, { requestKey: null })
-			)
-		);
+	function toggleCollapse(blockId: string) {
+		const next = new Set(collapsedBlocks);
+		if (next.has(blockId)) next.delete(blockId);
+		else next.add(blockId);
+		collapsedBlocks = next;
 	}
 
 	async function handleAIInsert(result: AIGenerationResult) {
 		try {
 			const blockType = result.outputType as BlockType;
-			const order = blocks.length + 1;
-			const block = await createBlock(chapterId, blockType, order);
+			const insertAt = aiInsertAfterIndex !== null ? aiInsertAfterIndex + 1 : blocks.length;
+			const block = await createBlock(chapterId, blockType, blocks.length + 1);
 			pendingData.set(block.id, result.data);
-			blocks = [...blocks, { ...block, data: result.data, order } as RuntimeBlock];
-			await persistOrder(blocks);
+			const newBlock = { ...block, data: result.data } as RuntimeBlock;
+			const newBlocks = [...blocks];
+			newBlocks.splice(insertAt, 0, newBlock);
+			blocks = newBlocks.map((b, i) => ({ ...b, order: i + 1 })) as RuntimeBlock[];
 			isDirty = true;
+			aiInsertAfterIndex = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not insert generated content.';
 		}
@@ -213,6 +238,7 @@
 	<p class="text-sm text-[var(--color-error-400)]">{error}</p>
 {:else}
 	<div class="flex flex-col gap-6 max-w-2xl">
+		<!-- Breadcrumb -->
 		<nav class="flex items-center gap-2 text-sm">
 			<a href="/creator" class="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">Creator</a>
 			<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" class="text-[var(--color-text-muted)]"><polyline points="9 18 15 12 9 6"/></svg>
@@ -221,20 +247,17 @@
 			<span class="truncate max-w-40 text-[var(--color-text-secondary)]">{chapterTitle || '…'}</span>
 		</nav>
 
+		<!-- Tab bar -->
 		<div class="flex gap-1 border-b border-[var(--color-surface-700)]">
 			<a href="/creator/textbooks/{textbookId}/chapters/{chapterId}"
-				class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors border-[var(--color-accent-500)] text-[var(--color-accent-400)]">
-				Content
-			</a>
+				class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors border-[var(--color-accent-500)] text-[var(--color-accent-400)]">Content</a>
 			<a href="/creator/textbooks/{textbookId}/chapters/{chapterId}/flashcards"
-				class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">
-				Flashcards
-			</a>
+				class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">Flashcards</a>
 		</div>
 
+		<!-- Top bar -->
 		<div class="flex items-center justify-between gap-4">
-			<InlineEdit bind:value={chapterTitle} placeholder="Chapter title" onSave={handleTitleSave}
-				displayClass="font-display text-3xl text-[var(--color-text-primary)]" />
+			<InlineEdit bind:value={chapterTitle} placeholder="Chapter title" onSave={handleTitleSave} displayClass="font-display text-3xl text-[var(--color-text-primary)]" />
 			<div class="flex shrink-0 items-center gap-2">
 				{#if !previewMode}
 					<button onclick={() => (previewMode = true)}
@@ -250,9 +273,7 @@
 			</div>
 		</div>
 
-		{#if error}
-			<p class="text-sm text-[var(--color-error-400)]">{error}</p>
-		{/if}
+		{#if error}<p class="text-sm text-[var(--color-error-400)]">{error}</p>{/if}
 
 		{#if previewMode}
 			<div class="flex items-center justify-between rounded-xl border border-[var(--color-accent-500)]/30 bg-[var(--color-accent-500)]/10 px-4 py-2.5">
@@ -261,8 +282,9 @@
 			</div>
 		{/if}
 
+		<!-- Blocks -->
 		<div role="list" class="flex flex-col gap-3">
-			{#each blocks as block (block.id)}
+			{#each blocks as block, blockIndex (block.id)}
 				{#if previewMode}
 					<div class="py-1">
 						{#if block.type === 'title'}<TitleBlockRenderer data={block.data} />
@@ -274,29 +296,53 @@
 						{:else if block.type === 'audio'}<AudioBlockRenderer data={block.data} />
 						{:else if block.type === 'divider'}<DividerBlockRenderer />
 						{:else if block.type === 'callout'}<CalloutBlockRenderer data={block.data} />
-						{:else if block.type === 'video'}<VideoBlockRenderer data={block.data} />{/if}
+						{:else if block.type === 'video'}<VideoBlockRenderer data={block.data} />
+						{/if}
 					</div>
 				{:else}
-					<BlockWrapper type={block.type} blockData={block.data} blockId={block.id}
+					<BlockWrapper
+						type={block.type}
+						blockData={block.data}
+						blockId={block.id}
+						collapsed={collapsedBlocks.has(block.id)}
+						onToggleCollapse={() => toggleCollapse(block.id)}
 						onDelete={() => handleDeleteBlock(block.id)}
-						onDragStart={handleDragStart} onDrop={handleDrop} {draggingId}>
-						{#if block.type === 'title'}<TitleBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
-						{:else if block.type === 'subtitle'}<SubtitleBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
-						{:else if block.type === 'paragraph'}<ParagraphBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
-						{:else if block.type === 'bullet_list'}<BulletListEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
-						{:else if block.type === 'table'}<TableEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
-						{:else if block.type === 'image'}<ImageBlockEditor data={block.data} blockId={block.id} onUpdate={(d) => handleBlockUpdate(block.id, d)} onUpload={handleUpload} />
-						{:else if block.type === 'audio'}<AudioBlockEditor data={block.data} blockId={block.id} onUpdate={(d) => handleBlockUpdate(block.id, d)} onUpload={handleUpload} />
-						{:else if block.type === 'divider'}<DividerBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
-						{:else if block.type === 'callout'}<CalloutBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
-						{:else if block.type === 'video'}<VideoBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />{/if}
+						onAddBelow={(type) => handleAddBlock(type, blockIndex)}
+						onDragStart={handleDragStart}
+						onDragEnd={handleDragEnd}
+						onDrop={handleDrop}
+						{draggingId}
+					>
+						{#if block.type === 'title'}
+							<TitleBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
+						{:else if block.type === 'subtitle'}
+							<SubtitleBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
+						{:else if block.type === 'paragraph'}
+							<ParagraphBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
+						{:else if block.type === 'bullet_list'}
+							<BulletListEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
+						{:else if block.type === 'table'}
+							<TableEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
+						{:else if block.type === 'image'}
+							<ImageBlockEditor data={block.data} blockId={block.id} onUpdate={(d) => handleBlockUpdate(block.id, d)} onUpload={handleUpload} />
+						{:else if block.type === 'audio'}
+							<AudioBlockEditor data={block.data} blockId={block.id} onUpdate={(d) => handleBlockUpdate(block.id, d)} onUpload={handleUpload} />
+						{:else if block.type === 'divider'}
+							<DividerBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
+						{:else if block.type === 'callout'}
+							<CalloutBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
+						{:else if block.type === 'video'}
+							<VideoBlockEditor data={block.data} onUpdate={(d) => handleBlockUpdate(block.id, d)} />
+						{/if}
 					</BlockWrapper>
 				{/if}
 			{/each}
 		</div>
 
 		{#if !previewMode}
-			<BlockTypePicker onSelect={handleAddBlock} />
+			<BlockTypePicker onSelect={(type) => handleAddBlock(type)} />
+
+			<!-- AI block generator at bottom -->
 			<div class="relative">
 				<button onclick={() => (showAIPicker = !showAIPicker)}
 					class="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--color-surface-600)] px-4 py-3 text-sm text-[var(--color-text-muted)] hover:border-[var(--color-accent-500)] hover:text-[var(--color-accent-400)] transition-colors">
@@ -307,10 +353,11 @@
 				</button>
 				{#if showAIPicker}
 					<div class="fixed inset-0 z-10" role="button" tabindex="-1" aria-label="Close picker"
-						onclick={() => (showAIPicker = false)} onkeydown={(e) => e.key === 'Escape' && (showAIPicker = false)}></div>
+					     onclick={() => (showAIPicker = false)}
+					     onkeydown={(e) => e.key === 'Escape' && (showAIPicker = false)}></div>
 					<div class="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-800)] shadow-2xl">
 						{#each AI_OUTPUT_TYPES as { type, label }}
-							<button onclick={() => { showAIPicker = false; aiOutputType = type; showAIModal = true; }}
+							<button onclick={() => { showAIPicker = false; aiOutputType = type; aiInsertAfterIndex = null; showAIModal = true; }}
 								class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-text-primary)] transition-colors">
 								{label}
 							</button>
