@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import { logout, getCurrentUser } from '$lib/auth/authService';
 	import { searchEverything } from '$lib/search/fullTextSearchService';
 	import type { SearchResultItem, SearchResults } from '$lib/search/searchTypes';
+	import { goto } from '$app/navigation';
 
 	interface Props {
 		onMenuToggle: () => void;
@@ -11,19 +11,17 @@
 	let { onMenuToggle }: Props = $props();
 	const user = getCurrentUser();
 
-	// ── Logout confirmation ───────────────────────────────────────────────────
 	let showLogoutModal = $state(false);
 	let loggingOut = $state(false);
 
 	async function handleLogout() {
 		loggingOut = true;
-		logout(); // clears auth + resets roleStore + clears localStorage
+		logout();
 		showLogoutModal = false;
-		await goto('/auth/login');
-		loggingOut = false;
+		// Hard reload ensures all Svelte stores, PocketBase state, and cookies are fully reset
+		window.location.href = '/auth/login';
 	}
 
-	// ── Search ────────────────────────────────────────────────────────────────
 	let searchOpen = $state(false);
 	let query = $state('');
 	let results = $state<SearchResults | null>(null);
@@ -50,16 +48,8 @@
 		  results.categories.length + results.flashcards.length
 		: 0);
 
-	function openSearch() {
-		searchOpen = true;
-		setTimeout(() => inputEl?.focus(), 50);
-	}
-
-	function closeSearch() {
-		searchOpen = false;
-		query = '';
-		results = null;
-	}
+	function openSearch() { searchOpen = true; setTimeout(() => inputEl?.focus(), 50); }
+	function closeSearch() { searchOpen = false; query = ''; results = null; }
 
 	function handleOutsideClick(e: MouseEvent) {
 		if (wrapperEl && !wrapperEl.contains(e.target as Node)) closeSearch();
@@ -86,13 +76,10 @@
 
 	function navigateTo(item: SearchResultItem) {
 		closeSearch();
-		if (item.navigationPath && item.navigationPath !== '/undefined') {
-			goto(item.navigationPath);
-		}
+		goto(item.navigationPath);
 	}
 </script>
 
-<!-- Logout confirmation modal -->
 {#if showLogoutModal}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 	<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70"
@@ -129,7 +116,6 @@
 	       border-b border-[var(--color-surface-700)] bg-[var(--color-surface-900)]/95
 	       px-4 backdrop-blur-sm lg:left-64"
 >
-	<!-- Mobile menu toggle -->
 	<button onclick={onMenuToggle} aria-label="Toggle menu"
 		class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)]
 		       hover:bg-[var(--color-surface-800)] hover:text-[var(--color-text-primary)] transition-colors lg:hidden">
@@ -138,7 +124,6 @@
 		</svg>
 	</button>
 
-	<!-- Search bar (expands when open) -->
 	<div class="flex flex-1 items-center justify-end lg:justify-start" bind:this={wrapperEl}>
 		{#if searchOpen}
 			<div class="relative flex w-full max-w-md items-center">
@@ -147,26 +132,16 @@
 				     class="absolute left-3 text-[var(--color-text-muted)] pointer-events-none">
 					<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
 				</svg>
-				<input
-					bind:this={inputEl}
-					bind:value={query}
-					type="search"
-					autocomplete="off"
-					autocorrect="off"
-					autocapitalize="off"
-					spellcheck="false"
-					placeholder="Search everything…"
+				<input bind:this={inputEl} bind:value={query} type="search" placeholder="Search everything…"
 					class="w-full rounded-xl border border-[var(--color-accent-500)]/50 bg-[var(--color-surface-800)]
 					       py-2 pl-9 pr-9 text-sm text-[var(--color-text-primary)]
-					       placeholder:text-[var(--color-text-muted)] focus:outline-none transition-colors"
-				/>
+					       placeholder:text-[var(--color-text-muted)] focus:outline-none transition-colors" />
 				<button onclick={closeSearch} aria-label="Close search"
 					class="absolute right-2.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
 						<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
 					</svg>
 				</button>
-
 				{#if query.trim()}
 					<div class="absolute left-0 top-full mt-2 w-full rounded-xl border border-[var(--color-surface-700)]
 					            bg-[var(--color-surface-800)] shadow-2xl overflow-hidden z-30 max-h-80 overflow-y-auto">
@@ -194,7 +169,6 @@
 				{/if}
 			</div>
 		{:else}
-			<!-- Desktop search icon — left side -->
 			<button onclick={openSearch} aria-label="Search"
 				class="hidden lg:flex h-9 w-9 items-center justify-center rounded-lg text-[var(--color-text-secondary)]
 				       hover:bg-[var(--color-surface-800)] hover:text-[var(--color-text-primary)] transition-colors">
@@ -206,16 +180,11 @@
 		{/if}
 	</div>
 
-	<!-- Right side: user name + mobile search + logout -->
 	{#if !searchOpen}
 		<div class="flex shrink-0 items-center gap-3 ml-auto">
 			{#if user}
-				<span class="hidden text-sm text-[var(--color-text-secondary)] sm:block">
-					{user.name || user.email}
-				</span>
+				<span class="hidden text-sm text-[var(--color-text-secondary)] sm:block">{user.name || user.email}</span>
 			{/if}
-
-			<!-- Mobile search -->
 			<button onclick={openSearch} aria-label="Search"
 				class="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--color-text-secondary)]
 				       hover:bg-[var(--color-surface-800)] hover:text-[var(--color-text-primary)]
@@ -225,7 +194,6 @@
 					<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
 				</svg>
 			</button>
-
 			<button onclick={() => (showLogoutModal = true)}
 				class="flex items-center gap-2 rounded-lg border border-[var(--color-surface-600)]
 				       px-3 py-1.5 text-sm text-[var(--color-text-secondary)] transition-colors

@@ -12,7 +12,6 @@ export interface RatingSummary {
 	average: number;
 	count: number;
 	userRating: number | null;
-	/** true if the current user is the content owner — they can see but not rate */
 	isOwner: boolean;
 }
 

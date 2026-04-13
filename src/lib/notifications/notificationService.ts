@@ -2,6 +2,7 @@ import { pb } from '$lib/shared/pocketbase';
 import { ClientResponseError } from 'pocketbase';
 import type { StudyNotification, NotificationForm, NotificationPermissionStatus } from './notificationTypes';
 import { getNextFireTime } from './notificationUtils';
+import { triggerStudyReminderNotification } from './inAppNotificationService';
 
 // ── Module-scope timeout tracking ─────────────────────────────────────────────
 const pending = new Map<string, ReturnType<typeof setTimeout>>();
@@ -49,11 +50,8 @@ export async function createNotification(form: NotificationForm): Promise<StudyN
 			scheduledAt = new Date(`${form.scheduledAt}T${form.scheduledTime}`).toISOString();
 		}
 		const r = await pb.collection('notifications').create({
-			user: uid,
-			title: form.title,
-			body: form.body,
-			icon: form.icon,
-			color: form.color,
+			user: uid, title: form.title, body: form.body,
+			icon: form.icon, color: form.color,
 			scheduleType: form.scheduleType,
 			scheduledAt: scheduledAt || null,
 			dailyTimes: form.scheduleType === 'daily' ? form.dailyTimes : null,
@@ -75,10 +73,7 @@ export async function updateNotification(id: string, form: NotificationForm): Pr
 			scheduledAt = new Date(`${form.scheduledAt}T${form.scheduledTime}`).toISOString();
 		}
 		const r = await pb.collection('notifications').update(id, {
-			title: form.title,
-			body: form.body,
-			icon: form.icon,
-			color: form.color,
+			title: form.title, body: form.body, icon: form.icon, color: form.color,
 			scheduleType: form.scheduleType,
 			scheduledAt: scheduledAt || null,
 			dailyTimes: form.scheduleType === 'daily' ? form.dailyTimes : null,
@@ -117,26 +112,7 @@ export async function updateLastFired(id: string): Promise<void> {
 	} catch { /* best-effort */ }
 }
 
-/** Create an in-app notification when a study reminder fires */
-async function createInAppStudyReminder(notification: StudyNotification): Promise<void> {
-	const uid = pb.authStore.record?.id;
-	if (!uid) return;
-	try {
-		await pb.collection('in_app_notifications').create({
-			user: uid,
-			type: 'study_reminder',
-			title: `🔔 ${notification.title}`,
-			body: notification.body || '',
-			relatedContentType: '',
-			relatedContentId: '',
-			relatedUserId: '',
-			relatedUserName: '',
-			isRead: false
-		}, { requestKey: null });
-	} catch { /* fire-and-forget */ }
-}
-
-// ── Browser Notification / Web Push ──────────────────────────────────────────
+// ── Browser Notifications ─────────────────────────────────────────────────────
 
 export function getPermissionStatus(): NotificationPermissionStatus {
 	if (typeof Notification === 'undefined') return 'denied';
@@ -150,22 +126,29 @@ export async function requestPermission(): Promise<NotificationPermissionStatus>
 }
 
 export function fireNotification(notification: StudyNotification): void {
-	if (typeof Notification === 'undefined') return;
-	if (Notification.permission !== 'granted') return;
-	try {
-		new Notification(notification.title, {
-			body: notification.body || undefined,
-			icon: '/icons/icon-192.png',
-			badge: '/icons/icon-192.png',
-			tag: notification.id,
-			data: { color: notification.color }
-		});
-		updateLastFired(notification.id);
-		// Also create in-app notification so it shows in the sidebar
-		createInAppStudyReminder(notification);
-	} catch (e) {
-		console.warn('Failed to fire notification:', e);
+	const uid = pb.authStore.record?.id;
+
+	// Always create an in-app notification record (visible in Notifications page)
+	if (uid) {
+		triggerStudyReminderNotification(uid, notification.title, notification.body);
 	}
+
+	// Also fire a browser push notification if permission granted
+	if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+		try {
+			new Notification(notification.title, {
+				body: notification.body || undefined,
+				icon: '/icons/icon-192.png',
+				badge: '/icons/icon-192.png',
+				tag: notification.id,
+				data: { color: notification.color }
+			});
+		} catch (e) {
+			console.warn('Failed to fire browser notification:', e);
+		}
+	}
+
+	updateLastFired(notification.id);
 }
 
 export function cancelScheduled(notificationId: string): void {
@@ -179,23 +162,19 @@ export function cancelScheduled(notificationId: string): void {
 export function scheduleNotification(notification: StudyNotification): void {
 	cancelScheduled(notification.id);
 	if (!notification.isActive) return;
-	if (Notification.permission !== 'granted') return;
 
 	const next = getNextFireTime(notification);
 	if (!next) return;
 
 	const msUntil = next.getTime() - Date.now();
 	if (msUntil < 0) return;
-
-	// Only schedule if within 25 hours (setTimeout has ~24h limit in practice)
 	if (msUntil > 25 * 60 * 60 * 1000) return;
 
 	const timer = setTimeout(() => {
 		fireNotification(notification);
 		pending.delete(notification.id);
-		// For recurring, reschedule after firing
 		if (notification.scheduleType !== 'once') {
-			setTimeout(() => scheduleNotification(notification), 61_000); // wait 61s then reschedule
+			setTimeout(() => scheduleNotification(notification), 61_000);
 		}
 	}, msUntil);
 
@@ -203,9 +182,7 @@ export function scheduleNotification(notification: StudyNotification): void {
 }
 
 export function scheduleAll(notifications: StudyNotification[]): void {
-	// Cancel all existing timers first
 	for (const id of pending.keys()) cancelScheduled(id);
-	// Reschedule active ones
 	for (const n of notifications) {
 		if (n.isActive) scheduleNotification(n);
 	}

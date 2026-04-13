@@ -48,20 +48,18 @@
 	let error = $state('');
 	let saving = $state(false);
 	let isDirty = $state(false);
+	// Auto-save state
+	let autoSaveStatus = $state<'idle' | 'pending' | 'saving' | 'saved'>('idle');
+	let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 	let previewMode = $state(false);
 	let showUnsavedModal = $state(false);
 	let pendingHref = $state('');
 	let draggingId = $state<string | null>(null);
-	let collapsedBlocks = $state<Set<string>>(new Set());
-
-	// Copy/paste clipboard (stored in module-level variable so it persists across chapters)
-	let clipboardNotice = $state<string | null>(null);
 
 	// AI state
 	let showAIPicker = $state(false);
 	let aiOutputType = $state<AIOutputType>('paragraph');
 	let showAIModal = $state(false);
-	let aiInsertAfterIndex = $state<number | null>(null);
 
 	const AI_OUTPUT_TYPES: { type: AIOutputType; label: string }[] = [
 		{ type: 'paragraph', label: 'Paragraph' },
@@ -88,6 +86,11 @@
 		} finally {
 			loading = false;
 		}
+
+		// Auto-save when page/tab becomes hidden (laptop lock, alt-tab away, etc.)
+		const onHide = () => { if (isDirty) saveAll(); };
+		document.addEventListener('visibilitychange', onHide);
+		return () => document.removeEventListener('visibilitychange', onHide);
 	});
 
 	beforeNavigate(({ cancel, to }) => {
@@ -99,19 +102,30 @@
 	});
 
 	async function saveAll() {
+		if (!pendingData.size && !isDirty) return;
 		saving = true;
 		error = '';
+		autoSaveStatus = 'saving';
 		try {
 			await Promise.all(
 				Array.from(pendingData.entries()).map(([id, data]) => updateBlock(id, data))
 			);
 			pendingData.clear();
 			isDirty = false;
+			autoSaveStatus = 'saved';
+			setTimeout(() => { if (autoSaveStatus === 'saved') autoSaveStatus = 'idle'; }, 2000);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not save.';
+			autoSaveStatus = 'idle';
 		} finally {
 			saving = false;
 		}
+	}
+
+	function scheduleAutoSave() {
+		autoSaveStatus = 'pending';
+		if (autoSaveTimer) clearTimeout(autoSaveTimer);
+		autoSaveTimer = setTimeout(() => { if (isDirty) saveAll(); }, 4000);
 	}
 
 	async function handleTitleSave(value: string) {
@@ -119,15 +133,11 @@
 		chapterTitle = value;
 	}
 
-	async function handleAddBlock(type: BlockType, afterIndex?: number) {
+	async function handleAddBlock(type: BlockType) {
 		try {
-			const insertAt = afterIndex !== undefined && afterIndex >= 0 ? afterIndex + 1 : blocks.length;
 			const block = await createBlock(chapterId, type, blocks.length + 1);
-			const newBlocks = [...blocks];
-			newBlocks.splice(insertAt, 0, block);
-			blocks = newBlocks.map((b, i) => ({ ...b, order: i + 1 }));
+			blocks = [...blocks, block];
 			isDirty = true;
-			if (insertAt < blocks.length - 1) await reorderBlocks(blocks);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not add block.';
 		}
@@ -139,6 +149,7 @@
 		blocks = blocks.map((b) => (b.id === blockId ? { ...b, data } as RuntimeBlock : b));
 		pendingData.set(blockId, data);
 		isDirty = true;
+		scheduleAutoSave();
 	}
 
 	async function handleDeleteBlock(blockId: string) {
@@ -146,7 +157,6 @@
 			await deleteBlock(blockId);
 			blocks = blocks.filter((b) => b.id !== blockId);
 			pendingData.delete(blockId);
-			collapsedBlocks.delete(blockId);
 			isDirty = true;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not delete block.';
@@ -161,8 +171,6 @@
 		draggingId = id;
 		e.dataTransfer?.setData('text/plain', id);
 	}
-
-	function handleDragEnd() { draggingId = null; }
 
 	async function handleDrop(e: DragEvent, targetId: string) {
 		e.preventDefault();
@@ -179,63 +187,13 @@
 		catch (e) { error = e instanceof Error ? e.message : 'Could not reorder.'; }
 	}
 
-	function toggleCollapse(blockId: string) {
-		const next = new Set(collapsedBlocks);
-		if (next.has(blockId)) next.delete(blockId);
-		else next.add(blockId);
-		collapsedBlocks = next;
-	}
-
-	// --- Copy / Paste ---
-	// Use localStorage to persist clipboard across chapters/sessions
-	function copyBlock(block: RuntimeBlock) {
-		const payload = { type: block.type, data: block.data };
-		try {
-			localStorage.setItem('studyapp_block_clipboard', JSON.stringify(payload));
-			clipboardNotice = `Copied "${block.type}" block`;
-			setTimeout(() => (clipboardNotice = null), 2000);
-		} catch { /* ignore */ }
-	}
-
-	async function pasteBlock(afterIndex?: number) {
-		try {
-			const raw = localStorage.getItem('studyapp_block_clipboard');
-			if (!raw) return;
-			const { type, data } = JSON.parse(raw) as { type: BlockType; data: Record<string, unknown> };
-			const insertAt = afterIndex !== undefined && afterIndex >= 0 ? afterIndex + 1 : blocks.length;
-			const block = await createBlock(chapterId, type, blocks.length + 1);
-			// immediately queue the data update so content is saved
-			pendingData.set(block.id, data);
-			const newBlock = { ...block, data } as RuntimeBlock;
-			const newBlocks = [...blocks];
-			newBlocks.splice(insertAt, 0, newBlock);
-			blocks = newBlocks.map((b, i) => ({ ...b, order: i + 1 }));
-			isDirty = true;
-			if (insertAt < blocks.length - 1) await reorderBlocks(blocks);
-			clipboardNotice = 'Pasted!';
-			setTimeout(() => (clipboardNotice = null), 1500);
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Could not paste block.';
-		}
-	}
-
-	function hasClipboard(): boolean {
-		try { return !!localStorage.getItem('studyapp_block_clipboard'); }
-		catch { return false; }
-	}
-
 	async function handleAIInsert(result: AIGenerationResult) {
 		try {
 			const blockType = result.outputType as BlockType;
-			const insertAt = aiInsertAfterIndex !== null ? aiInsertAfterIndex + 1 : blocks.length;
 			const block = await createBlock(chapterId, blockType, blocks.length + 1);
 			pendingData.set(block.id, result.data);
-			const newBlock = { ...block, data: result.data } as RuntimeBlock;
-			const newBlocks = [...blocks];
-			newBlocks.splice(insertAt, 0, newBlock);
-			blocks = newBlocks.map((b, i) => ({ ...b, order: i + 1 })) as RuntimeBlock[];
+			blocks = [...blocks, { ...block, data: result.data } as RuntimeBlock];
 			isDirty = true;
-			aiInsertAfterIndex = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not insert generated content.';
 		}
@@ -246,18 +204,25 @@
 	async function handleModalSave() { await saveAll(); }
 </script>
 
-<svelte:head><title>{chapterTitle || 'Chapter'} — StudyApp</title></svelte:head>
+<svelte:head>
+	<title>{chapterTitle || 'Chapter'} — StudyApp</title>
+</svelte:head>
 
-<UnsavedChangesModal isOpen={showUnsavedModal} {saving} onSave={handleModalSave} onLeave={handleModalLeave} onStay={handleModalStay} />
+<UnsavedChangesModal
+	isOpen={showUnsavedModal}
+	{saving}
+	onSave={handleModalSave}
+	onLeave={handleModalLeave}
+	onStay={handleModalStay}
+/>
 
 {#if showAIModal}
-	<AIGenerationModal isOpen={true} outputType={aiOutputType} onInsert={handleAIInsert} onClose={() => (showAIModal = false)} />
-{/if}
-
-{#if clipboardNotice}
-	<div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-xl bg-[var(--color-surface-800)] border border-[var(--color-surface-600)] px-4 py-2 text-sm text-[var(--color-text-secondary)] shadow-xl pointer-events-none">
-		{clipboardNotice}
-	</div>
+	<AIGenerationModal
+		isOpen={true}
+		outputType={aiOutputType}
+		onInsert={handleAIInsert}
+		onClose={() => (showAIModal = false)}
+	/>
 {/if}
 
 {#if loading}
@@ -269,11 +234,14 @@
 	<p class="text-sm text-[var(--color-error-400)]">{error}</p>
 {:else}
 	<div class="flex flex-col gap-6 max-w-2xl">
+
 		<!-- Breadcrumb -->
 		<nav class="flex items-center gap-2 text-sm">
 			<a href="/creator" class="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">Creator</a>
 			<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" class="text-[var(--color-text-muted)]"><polyline points="9 18 15 12 9 6"/></svg>
-			<a href="/creator/textbooks/{textbookId}" class="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors truncate max-w-40">{textbookTitle || '…'}</a>
+			<a href="/creator/textbooks/{textbookId}" class="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors truncate max-w-40">
+				{textbookTitle || '…'}
+			</a>
 			<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" class="text-[var(--color-text-muted)]"><polyline points="9 18 15 12 9 6"/></svg>
 			<span class="truncate max-w-40 text-[var(--color-text-secondary)]">{chapterTitle || '…'}</span>
 		</nav>
@@ -281,39 +249,66 @@
 		<!-- Tab bar -->
 		<div class="flex gap-1 border-b border-[var(--color-surface-700)]">
 			<a href="/creator/textbooks/{textbookId}/chapters/{chapterId}"
-				class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors border-[var(--color-accent-500)] text-[var(--color-accent-400)]">Content</a>
+				class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors
+				       border-[var(--color-accent-500)] text-[var(--color-accent-400)]">
+				Content
+			</a>
 			<a href="/creator/textbooks/{textbookId}/chapters/{chapterId}/flashcards"
-				class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">Flashcards</a>
+				class="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors
+				       border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">
+				Flashcards
+			</a>
 		</div>
 
 		<!-- Top bar -->
 		<div class="flex items-center justify-between gap-4">
-			<InlineEdit bind:value={chapterTitle} placeholder="Chapter title" onSave={handleTitleSave} displayClass="font-display text-3xl text-[var(--color-text-primary)]" />
+			<InlineEdit
+				bind:value={chapterTitle}
+				placeholder="Chapter title"
+				onSave={handleTitleSave}
+				displayClass="font-display text-3xl text-[var(--color-text-primary)]"
+			/>
+
 			<div class="flex shrink-0 items-center gap-2">
 				{#if !previewMode}
 					<button onclick={() => (previewMode = true)}
-						class="rounded-lg border border-[var(--color-surface-600)] px-3 py-1.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">Preview</button>
+						class="rounded-lg border border-[var(--color-surface-600)] px-3 py-1.5 text-sm
+						       text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">
+						Preview
+					</button>
 					<button onclick={saveAll} disabled={saving || !isDirty}
 						class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors
-						       {isDirty ? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)]' : 'text-[var(--color-text-muted)] cursor-default'}">
-						{saving ? 'Saving…' : isDirty ? 'Save' : 'Saved'}
+						       {isDirty
+							? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)]'
+							: 'text-[var(--color-text-muted)] cursor-default'}">
+						{#if saving}Saving…
+						{:else if autoSaveStatus === 'pending'}<span class="opacity-70">Auto-saving…</span>
+						{:else if autoSaveStatus === 'saved'}<span style="color:var(--color-success-500)">Saved ✓</span>
+						{:else if isDirty}Save
+						{:else}Saved{/if}
 					</button>
 				{/if}
 			</div>
 		</div>
 
-		{#if error}<p class="text-sm text-[var(--color-error-400)]">{error}</p>{/if}
+		{#if error}
+			<p class="text-sm text-[var(--color-error-400)]">{error}</p>
+		{/if}
 
 		{#if previewMode}
-			<div class="flex items-center justify-between rounded-xl border border-[var(--color-accent-500)]/30 bg-[var(--color-accent-500)]/10 px-4 py-2.5">
+			<div class="flex items-center justify-between rounded-xl border border-[var(--color-accent-500)]/30
+			            bg-[var(--color-accent-500)]/10 px-4 py-2.5">
 				<span class="text-sm font-medium text-[var(--color-accent-400)]">Preview Mode</span>
-				<button onclick={() => (previewMode = false)} class="text-sm text-[var(--color-accent-400)] hover:text-[var(--color-accent-300)] transition-colors">Back to Edit</button>
+				<button onclick={() => (previewMode = false)}
+					class="text-sm text-[var(--color-accent-400)] hover:text-[var(--color-accent-300)] transition-colors">
+					Back to Edit
+				</button>
 			</div>
 		{/if}
 
 		<!-- Blocks -->
 		<div role="list" class="flex flex-col gap-3">
-			{#each blocks as block, blockIndex (block.id)}
+			{#each blocks as block (block.id)}
 				{#if previewMode}
 					<div class="py-1">
 						{#if block.type === 'title'}<TitleBlockRenderer data={block.data} />
@@ -334,14 +329,8 @@
 						type={block.type}
 						blockData={block.data}
 						blockId={block.id}
-						collapsed={collapsedBlocks.has(block.id)}
-						onToggleCollapse={() => toggleCollapse(block.id)}
 						onDelete={() => handleDeleteBlock(block.id)}
-						onAddBelow={(type) => handleAddBlock(type, blockIndex)}
-						onCopy={() => copyBlock(block)}
-						onPaste={() => pasteBlock(blockIndex)}
 						onDragStart={handleDragStart}
-						onDragEnd={handleDragEnd}
 						onDrop={handleDrop}
 						{draggingId}
 					>
@@ -374,25 +363,32 @@
 		</div>
 
 		{#if !previewMode}
-			<BlockTypePicker onSelect={(type) => handleAddBlock(type)} />
+			<BlockTypePicker onSelect={handleAddBlock} />
 
-			<!-- AI generator -->
+			<!-- AI block generator -->
 			<div class="relative">
-				<button onclick={() => (showAIPicker = !showAIPicker)}
-					class="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--color-surface-600)] px-4 py-3 text-sm text-[var(--color-text-muted)] hover:border-[var(--color-accent-500)] hover:text-[var(--color-accent-400)] transition-colors">
+				<button
+					onclick={() => (showAIPicker = !showAIPicker)}
+					class="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed
+					       border-[var(--color-surface-600)] px-4 py-3 text-sm text-[var(--color-text-muted)]
+					       hover:border-[var(--color-accent-500)] hover:text-[var(--color-accent-400)] transition-colors"
+				>
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
 						<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
 					</svg>
 					Generate with AI
 				</button>
+
 				{#if showAIPicker}
 					<div class="fixed inset-0 z-10" role="button" tabindex="-1" aria-label="Close picker"
-					     onclick={() => (showAIPicker = false)}
-					     onkeydown={(e) => e.key === 'Escape' && (showAIPicker = false)}></div>
-					<div class="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-800)] shadow-2xl">
+					     onclick={() => (showAIPicker = false)} onkeydown={(e) => e.key === 'Escape' && (showAIPicker = false)}></div>
+					<div class="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl
+					            border border-[var(--color-surface-700)] bg-[var(--color-surface-800)] shadow-2xl">
 						{#each AI_OUTPUT_TYPES as { type, label }}
-							<button onclick={() => { showAIPicker = false; aiOutputType = type; aiInsertAfterIndex = null; showAIModal = true; }}
-								class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-text-primary)] transition-colors">
+							<button onclick={() => { showAIPicker = false; aiOutputType = type; showAIModal = true; }}
+								class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm
+								       text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-700)]
+								       hover:text-[var(--color-text-primary)] transition-colors">
 								{label}
 							</button>
 						{/each}

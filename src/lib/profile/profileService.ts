@@ -87,23 +87,15 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
 
 export async function searchUsers(query: string): Promise<PublicProfile[]> {
 	try {
-		// Use only isProfilePublic filter — isDeleted may not exist on all deployments
-		// and causes a 400. We filter isDeleted client-side instead.
 		const filter = query.trim()
-			? `isProfilePublic = true && name ~ "${query.trim().replace(/"/g, '\\"')}"`
-			: 'isProfilePublic = true';
-
+			? `isProfilePublic = true && isDeleted = false && name ~ "${query}"`
+			: 'isProfilePublic = true && isDeleted = false';
 		const records = await pb.collection('users').getFullList({
-			requestKey: null,
-			filter,
+			requestKey: null, filter,
 			fields: 'id,name,avatar,bio,instagramUrl,youtubeUrl,websiteUrl,isProfilePublic,isDeleted,created',
 			sort: 'name'
 		});
-
-		// Filter out deleted accounts client-side
-		return records
-			.map(toPublicProfile)
-			.filter((p) => !p.isDeleted);
+		return records.map(toPublicProfile);
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
 		throw e;
@@ -131,24 +123,14 @@ export async function getFollowingCount(userId: string): Promise<number> {
 export async function getFollowers(userId: string): Promise<FollowerUser[]> {
 	try {
 		const records = await pb.collection('follows').getFullList({
-			requestKey: null,
-			filter: `following = "${userId}"`,
-			expand: 'follower',
-			sort: '-created'
+			requestKey: null, filter: `following = "${userId}"`, expand: 'follower', sort: '-created'
 		});
 		return records.map((r) => {
 			const u = r.expand?.follower as Record<string, unknown> | undefined;
 			const uRec = u ?? {};
 			const id = (uRec.id as string) ?? (r.follower as string);
-			if (!u || !(uRec.name || uRec.email)) {
-				return { id, name: '[deleted]', avatarUrl: '', bio: '' };
-			}
-			return {
-				id,
-				name: ((uRec.name as string) || (uRec.email as string)) ?? '',
-				avatarUrl: avatarUrl(uRec),
-				bio: (uRec.bio as string) ?? ''
-			};
+			if (!u || !(uRec.name || uRec.email)) return { id, name: '[deleted]', avatarUrl: '', bio: '' };
+			return { id, name: ((uRec.name as string) || (uRec.email as string)) ?? '', avatarUrl: avatarUrl(uRec), bio: (uRec.bio as string) ?? '' };
 		});
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
@@ -159,24 +141,14 @@ export async function getFollowers(userId: string): Promise<FollowerUser[]> {
 export async function getFollowing(userId: string): Promise<FollowerUser[]> {
 	try {
 		const records = await pb.collection('follows').getFullList({
-			requestKey: null,
-			filter: `follower = "${userId}"`,
-			expand: 'following',
-			sort: '-created'
+			requestKey: null, filter: `follower = "${userId}"`, expand: 'following', sort: '-created'
 		});
 		return records.map((r) => {
 			const u = r.expand?.following as Record<string, unknown> | undefined;
 			const uRec = u ?? {};
 			const id = (uRec.id as string) ?? (r.following as string);
-			if (!u || !(uRec.name || uRec.email)) {
-				return { id, name: '[deleted]', avatarUrl: '', bio: '' };
-			}
-			return {
-				id,
-				name: ((uRec.name as string) || (uRec.email as string)) ?? '',
-				avatarUrl: avatarUrl(uRec),
-				bio: (uRec.bio as string) ?? ''
-			};
+			if (!u || !(uRec.name || uRec.email)) return { id, name: '[deleted]', avatarUrl: '', bio: '' };
+			return { id, name: ((uRec.name as string) || (uRec.email as string)) ?? '', avatarUrl: avatarUrl(uRec), bio: (uRec.bio as string) ?? '' };
 		});
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
@@ -189,8 +161,7 @@ export async function isFollowing(userId: string): Promise<string | null> {
 	if (!me || me === userId) return null;
 	try {
 		const records = await pb.collection('follows').getFullList({
-			requestKey: null,
-			filter: `follower = "${me}" && following = "${userId}"`
+			requestKey: null, filter: `follower = "${me}" && following = "${userId}"`
 		});
 		return records.length > 0 ? (records[0].id as string) : null;
 	} catch { return null; }
@@ -200,9 +171,7 @@ export async function followUser(userId: string): Promise<Follow> {
 	const me = pb.authStore.record?.id;
 	if (!me) throw new Error('Not authenticated.');
 	try {
-		const r = await pb.collection('follows').create({
-			follower: me, following: userId
-		}, { requestKey: null });
+		const r = await pb.collection('follows').create({ follower: me, following: userId }, { requestKey: null });
 		return { id: r.id as string, follower: r.follower as string, following: r.following as string, created: r.created as string };
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
@@ -225,30 +194,12 @@ export async function getPublishedContent(userId: string): Promise<{
 }> {
 	try {
 		const [tb, cats] = await Promise.all([
-			pb.collection('textbooks').getFullList({
-				requestKey: null,
-				filter: `owner = "${userId}" && isShared = true`,
-				sort: '-created'
-			}),
-			pb.collection('flashcard_categories').getFullList({
-				requestKey: null,
-				filter: `owner = "${userId}" && isShared = true`,
-				sort: '-created'
-			})
+			pb.collection('textbooks').getFullList({ requestKey: null, filter: `owner = "${userId}" && isShared = true`, sort: '-created' }),
+			pb.collection('flashcard_categories').getFullList({ requestKey: null, filter: `owner = "${userId}" && isShared = true`, sort: '-created' })
 		]);
 		return {
-			textbooks: tb.map((r) => ({
-				id: r.id as string, title: r.title as string,
-				description: (r.description as string) ?? '',
-				shareTitle: (r.shareTitle as string) ?? (r.title as string),
-				shareDescription: (r.shareDescription as string) ?? ''
-			})),
-			categories: cats.map((r) => ({
-				id: r.id as string, name: r.name as string,
-				description: (r.description as string) ?? '',
-				shareTitle: (r.shareTitle as string) ?? (r.name as string),
-				shareDescription: (r.shareDescription as string) ?? ''
-			}))
+			textbooks: tb.map((r) => ({ id: r.id as string, title: r.title as string, description: (r.description as string) ?? '', shareTitle: (r.shareTitle as string) ?? (r.title as string), shareDescription: (r.shareDescription as string) ?? '' })),
+			categories: cats.map((r) => ({ id: r.id as string, name: r.name as string, description: (r.description as string) ?? '', shareTitle: (r.shareTitle as string) ?? (r.name as string), shareDescription: (r.shareDescription as string) ?? '' }))
 		};
 	} catch (e) {
 		if (e instanceof ClientResponseError) throw new Error(e.message);
@@ -270,14 +221,51 @@ export async function getProfileStats(userId: string): Promise<ProfileStats> {
 		const installCounts: Array<{ id: string; title: string; installs: number; type: 'textbook' | 'deck' }> = [];
 
 		if (allContentIds.length > 0) {
-			const filter = '(' + allContentIds.map((id) => `contentId = "${id}"`).join(' || ') + ')';
-			const installs = await pb.collection('installs').getFullList({ requestKey: null, filter, fields: 'contentId' });
-			const counts: Record<string, number> = {};
-			for (const id of allContentIds) counts[id] = 0;
-			for (const r of installs) { const id = r.contentId as string; if (id in counts) counts[id]++; }
-			totalInstalls = Object.values(counts).reduce((a, b) => a + b, 0);
-			for (const tb of tbList) { installCounts.push({ id: tb.id as string, title: (tb.shareTitle as string) || (tb.title as string), installs: counts[tb.id as string] ?? 0, type: 'textbook' }); }
-			for (const cat of catList) { installCounts.push({ id: cat.id as string, title: (cat.shareTitle as string) || (cat.name as string), installs: counts[cat.id as string] ?? 0, type: 'deck' }); }
+			const idFilter = '(' + allContentIds.map((id) => `contentId = "${id}"`).join(' || ') + ')';
+			const forkedTbFilter = '(' + tbList.map((r) => `forkedFrom = "${r.id}"`).join(' || ') + ')';
+			const forkedCatFilter = '(' + catList.map((r) => `forkedFrom = "${r.id}"`).join(' || ') + ')';
+
+			// Current installs
+			const installs = await pb.collection('installs').getFullList({ requestKey: null, filter: idFilter, fields: 'contentId,user' });
+
+			// Count forks (duplicates) - these represent people who "got" the content even if they later uninstalled
+			const [forkedTbs, forkedCats] = await Promise.all([
+				tbList.length > 0
+					? pb.collection('textbooks').getFullList({ requestKey: null, filter: forkedTbFilter, fields: 'id,forkedFrom,owner' })
+					: Promise.resolve([]),
+				catList.length > 0
+					? pb.collection('flashcard_categories').getFullList({ requestKey: null, filter: forkedCatFilter, fields: 'id,forkedFrom,owner' })
+					: Promise.resolve([])
+			]);
+
+			// Build per-content counts: current installs + unique forkers (excluding the owner themselves)
+			const counts: Record<string, Set<string>> = {};
+			for (const id of allContentIds) counts[id] = new Set();
+
+			// Add current installers
+			for (const r of installs) {
+				const id = r.contentId as string;
+				const user = r.user as string;
+				if (id in counts) counts[id].add(user);
+			}
+
+			// Add forkers (people who duplicated the content) - exclude the original owner
+			for (const r of [...forkedTbs, ...forkedCats]) {
+				const srcId = r.forkedFrom as string;
+				const forkOwner = r.owner as string;
+				if (srcId in counts && forkOwner !== userId) {
+					counts[srcId].add(forkOwner);
+				}
+			}
+
+			totalInstalls = Object.values(counts).reduce((sum, set) => sum + set.size, 0);
+
+			for (const tb of tbList) {
+				installCounts.push({ id: tb.id as string, title: (tb.shareTitle as string) || (tb.title as string), installs: counts[tb.id as string]?.size ?? 0, type: 'textbook' });
+			}
+			for (const cat of catList) {
+				installCounts.push({ id: cat.id as string, title: (cat.shareTitle as string) || (cat.name as string), installs: counts[cat.id as string]?.size ?? 0, type: 'deck' });
+			}
 			installCounts.sort((a, b) => b.installs - a.installs);
 		}
 
