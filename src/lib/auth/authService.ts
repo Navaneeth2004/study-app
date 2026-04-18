@@ -48,6 +48,16 @@ export async function verifyOtp(otpId: string, otp: string): Promise<void> {
 	}
 }
 
+export async function resendOtp(email: string): Promise<OtpRequest> {
+	try {
+		const result = await users().requestOTP(email);
+		return { otpId: result.otpId, email };
+	} catch (e) {
+		if (e instanceof ClientResponseError) throw new Error(e.message);
+		throw e;
+	}
+}
+
 export async function unlockCreator(password: string): Promise<void> {
 	const user = pb.authStore.record;
 	if (!user) throw new Error('Not authenticated.');
@@ -69,13 +79,15 @@ export function isAuthenticated(): boolean {
 	return pb.authStore.isValid;
 }
 
+/** Returns true if the current user's email has been verified */
+export function isEmailVerified(): boolean {
+	return pb.authStore.record?.verified === true;
+}
+
 export function logout(): void {
-	// Clear PocketBase auth
 	pb.authStore.clear();
 	roleStore.reset();
-	// Clear any session storage that could leak between users
 	try { sessionStorage.clear(); } catch { /* ignore */ }
-	// Note: localStorage AI keys are intentionally kept (they're per-device not per-user)
 }
 
 export async function verifyPassword(password: string): Promise<boolean> {

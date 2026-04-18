@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import RoleSection from '$lib/settings/components/RoleSection.svelte';
 	import AISettingsSection from '$lib/settings/components/AISettingsSection.svelte';
+	import AudioSettingsSection from '$lib/audio/components/AudioSettingsSection.svelte';
 	import ReviewSettingsSection from '$lib/settings/components/ReviewSettingsSection.svelte';
 	import SharingSection from '$lib/settings/components/SharingSection.svelte';
 	import InstalledContentSection from '$lib/settings/components/InstalledContentSection.svelte';
@@ -13,27 +14,25 @@
 	const verified = isEmailVerified();
 	const user = getCurrentUser();
 
-	let showOtp = $state(false);
-	let otpId = $state('');
+	let showOtp    = $state(false);
+	let otpId      = $state('');
 	let sendingOtp = $state(false);
-	let otpError = $state('');
+	let otpError   = $state('');
 
 	async function startVerification() {
 		if (!user?.email) return;
 		sendingOtp = true; otpError = '';
 		try {
 			const result = await resendOtp(user.email as string);
-			otpId = result.otpId;
+			otpId   = result.otpId;
 			showOtp = true;
 		} catch (e) { otpError = e instanceof Error ? e.message : 'Could not send code.'; }
 		finally { sendingOtp = false; }
 	}
 
 	async function handleVerify(otp: string) {
-		// verifyOtp authenticates with PocketBase which updates authStore;
-		// navigating to /settings causes a fresh load which re-reads isEmailVerified()
 		await verifyOtp(otpId, otp);
-		goto('/viewer'); // go to app — they're now verified
+		goto('/viewer');
 	}
 
 	async function handleResend() {
@@ -53,7 +52,6 @@
 
 	{#if !verified}
 		{#if showOtp}
-			<!-- OTP entry — no duplicate text, no "use different email" button -->
 			<div class="rounded-2xl border border-[var(--color-surface-700)] bg-[var(--color-surface-900)] p-6 flex flex-col gap-3">
 				<div>
 					<h2 class="text-base font-semibold text-[var(--color-text-primary)]">Enter verification code</h2>
@@ -61,16 +59,8 @@
 						Sent to <span class="text-[var(--color-accent-400)]">{user?.email}</span>
 					</p>
 				</div>
-				<!-- hideBack=true removes the "Use a different email" button since we're already logged in -->
-				<OtpInput
-					email={user?.email as string}
-					hideBack={true}
-					onSubmit={handleVerify}
-					onResend={handleResend}
-				/>
-				<button onclick={() => (showOtp = false)} class="self-start text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
-					← Back
-				</button>
+				<OtpInput email={user?.email as string} hideBack={true} onSubmit={handleVerify} onResend={handleResend} />
+				<button onclick={() => (showOtp = false)} class="self-start text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">← Back</button>
 			</div>
 		{:else}
 			<div class="flex flex-col gap-4 rounded-2xl border border-[var(--color-warning-500)]/40 bg-[var(--color-warning-500)]/5 p-6">
@@ -94,9 +84,7 @@
 						class="rounded-xl bg-[var(--color-accent-500)] px-4 py-2.5 text-sm font-medium text-white hover:bg-[var(--color-accent-400)] disabled:opacity-50 transition-colors">
 						{sendingOtp ? 'Sending…' : 'Send verification code'}
 					</button>
-					<a href="/viewer" class="rounded-xl border border-[var(--color-surface-600)] px-4 py-2.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">
-						Go to app
-					</a>
+					<a href="/viewer" class="rounded-xl border border-[var(--color-surface-600)] px-4 py-2.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors">Go to app</a>
 				</div>
 			</div>
 		{/if}
@@ -104,6 +92,7 @@
 	{:else}
 		<RoleSection />
 		<AISettingsSection />
+		<AudioSettingsSection />
 		<ReviewSettingsSection />
 		<SharingSection />
 		<InstalledContentSection />
