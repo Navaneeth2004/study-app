@@ -7,7 +7,9 @@
 	}
 	let { data, onUpdate }: Props = $props();
 
-	let inputRefs: HTMLInputElement[] = [];
+	// Keep refs as array — indexed by position
+	let inputRefs: (HTMLInputElement | null)[] = $state([]);
+	let focusedIndex = $state(-1);
 
 	function updateItem(index: number, value: string) {
 		const items = [...data.items];
@@ -16,58 +18,82 @@
 	}
 
 	function addItem() {
-		onUpdate({ items: [...data.items, ''] });
+		const items = [...data.items, ''];
+		onUpdate({ items });
 		// Focus the new input on next tick
-		setTimeout(() => inputRefs[data.items.length]?.focus(), 0);
+		setTimeout(() => inputRefs[items.length - 1]?.focus(), 0);
 	}
 
 	function removeItem(index: number) {
+		if (data.items.length <= 1) return;
 		const items = data.items.filter((_, i) => i !== index);
-		onUpdate({ items: items.length > 0 ? items : [''] });
+		onUpdate({ items });
+		setTimeout(() => inputRefs[Math.max(0, index - 1)]?.focus(), 0);
 	}
 
 	function handleKeydown(e: KeyboardEvent, index: number) {
 		if (e.key === 'Enter') { e.preventDefault(); addItem(); }
 		if (e.key === 'Backspace' && data.items[index] === '' && data.items.length > 1) {
-			e.preventDefault(); removeItem(index);
-			setTimeout(() => inputRefs[index - 1]?.focus(), 0);
+			e.preventDefault();
+			removeItem(index);
 		}
 	}
 
-	function wrapSelection(index: number, tag: string) {
-		const input = inputRefs[index];
+	// Wrap selected text in the currently focused input
+	function wrapSelection(tag: string) {
+		const idx = focusedIndex;
+		if (idx < 0) return;
+		const input = inputRefs[idx];
 		if (!input) return;
+
+		// Re-focus the input first so selection is still valid
+		input.focus();
+
 		const start = input.selectionStart ?? 0;
 		const end = input.selectionEnd ?? 0;
 		const selected = input.value.slice(start, end);
 		const wrapped = `<${tag}>${selected}</${tag}>`;
 		const newVal = input.value.slice(0, start) + wrapped + input.value.slice(end);
-		updateItem(index, newVal);
+
+		updateItem(idx, newVal);
+
+		// Restore cursor inside the wrapped content
 		setTimeout(() => {
-			input.setSelectionRange(start + tag.length + 2, start + tag.length + 2 + selected.length);
 			input.focus();
+			const newCursorPos = start + tag.length + 2 + selected.length;
+			input.setSelectionRange(start + tag.length + 2, newCursorPos);
 		}, 0);
 	}
-
-	let focusedIndex = $state(-1);
 </script>
 
 <div class="flex flex-col gap-2">
-	<!-- Formatting toolbar - shows when an item is focused -->
-	<div class="flex items-center gap-1 h-7">
-		{#if focusedIndex >= 0}
-			{#each [['b','B'],['i','I'],['l','U']] as [tag, label]}
-				<button type="button" onclick={() => wrapSelection(focusedIndex, tag)}
-					class="flex h-7 w-7 items-center justify-center rounded text-xs font-bold
-					       text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-text-primary)] transition-colors"
-					aria-label="Wrap in {tag} tag">
-					{label}
-				</button>
-			{/each}
-			<div class="mx-1 h-4 w-px bg-[var(--color-surface-600)]"></div>
-			<span class="text-xs text-[var(--color-text-muted)]">Select text then click B/I/U</span>
+	<!-- Formatting toolbar — always visible, dimmed when nothing focused -->
+	<div class="flex items-center gap-1 border-b border-[var(--color-surface-700)] pb-2 mb-1">
+		{#each [['b', 'B', 'Bold'], ['i', 'I', 'Italic'], ['l', 'U', 'Underline']] as [tag, label, title]}
+			<button
+				type="button"
+				onmousedown={(e) => {
+					// Prevent blur on input before we read selection
+					e.preventDefault();
+					wrapSelection(tag);
+				}}
+				title={title}
+				class="flex h-7 w-7 items-center justify-center rounded text-xs font-bold
+				       {focusedIndex >= 0
+					? 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-text-primary)]'
+					: 'text-[var(--color-text-muted)] opacity-50'}
+				       transition-colors"
+			>
+				{#if tag === 'b'}<strong>{label}</strong>
+				{:else if tag === 'i'}<em>{label}</em>
+				{:else}<span style="text-decoration:underline">{label}</span>
+				{/if}
+			</button>
+		{/each}
+		{#if focusedIndex < 0}
+			<span class="text-xs text-[var(--color-text-muted)] ml-1">Click a bullet to format text</span>
 		{:else}
-			<span class="text-xs text-[var(--color-text-muted)]">Click an item to format text</span>
+			<span class="text-xs text-[var(--color-text-muted)] ml-1">Select text then B / I / U</span>
 		{/if}
 	</div>
 
@@ -81,7 +107,12 @@
 				oninput={(e) => updateItem(index, (e.target as HTMLInputElement).value)}
 				onkeydown={(e) => handleKeydown(e, index)}
 				onfocus={() => (focusedIndex = index)}
-				onblur={() => (focusedIndex = -1)}
+				onblur={() => {
+					// Small delay so onmousedown on toolbar button fires first
+					setTimeout(() => {
+						if (focusedIndex === index) focusedIndex = -1;
+					}, 150);
+				}}
 				placeholder="List item…"
 				class="flex-1 bg-transparent text-sm text-[var(--color-text-primary)]
 				       placeholder:text-[var(--color-text-muted)] focus:outline-none"

@@ -1,34 +1,43 @@
 import type { AudioScript, AudioTemplate } from './audioTypes';
 
-const PROMPTS: Record<AudioTemplate, string> = {
-	podcast: `You are converting educational text into a podcast script with TWO speakers.
+function buildPrompt(template: AudioTemplate, userPrompt?: string): string {
+	const base: Record<AudioTemplate, string> = {
+		podcast: `You are converting educational text into a podcast script with TWO speakers.
 Speaker "host" introduces topics and asks questions.
 Speaker "guest" explains concepts with examples.
 Return ONLY valid JSON: { "template": "podcast", "segments": [{"speaker": "host"|"guest", "text": "..."}] }
 Aim for 8-16 natural-sounding segments.`,
 
-	story: `Convert educational text into an engaging narrative story.
+		story: `Convert educational text into an engaging narrative story.
 Add vivid descriptions and smooth transitions while keeping all key information.
 Use a single narrator voice.
 Return ONLY valid JSON: { "template": "story", "segments": [{"speaker": "narrator", "text": "..."}] }`,
 
-	commentary: `Convert educational text into sharp, opinionated commentary.
+		commentary: `Convert educational text into sharp, opinionated commentary.
 Highlight the most important ideas. Be direct and punchy.
 Return ONLY valid JSON: { "template": "commentary", "segments": [{"speaker": "narrator", "text": "..."}] }`,
 
-	plain: `Clean educational text for smooth text-to-speech playback.
+		plain: `Clean educational text for smooth text-to-speech playback.
 Remove HTML tags, markdown, bullet symbols. Fix awkward phrasing. Keep all information.
 Return ONLY valid JSON: { "template": "plain", "segments": [{"speaker": "narrator", "text": "..."}] }`
-};
+	};
+
+	let prompt = base[template];
+	if (userPrompt && userPrompt.trim()) {
+		prompt += `\n\nAdditional instructions from the user: ${userPrompt.trim()}`;
+	}
+	return prompt;
+}
 
 export async function generateScript(
 	chapterTitle: string,
 	chapterText:  string,
 	template:     AudioTemplate,
 	aiProvider:   string,
-	apiKey:       string
+	apiKey:       string,
+	userPrompt?:  string
 ): Promise<AudioScript> {
-	const system  = PROMPTS[template];
+	const system  = buildPrompt(template, userPrompt);
 	const content = `Chapter: "${chapterTitle}"\n\n${chapterText.slice(0, 9000)}`;
 	let text = '';
 
@@ -42,7 +51,12 @@ export async function generateScript(
 				messages: [{ role: 'system', content: system }, { role: 'user', content }]
 			})
 		});
-		if (!res.ok) throw new Error(res.status === 401 ? 'Invalid OpenAI key.' : `OpenAI error (${res.status}).`);
+		if (!res.ok) {
+			const msg = res.status === 401 ? 'Invalid OpenAI key. Check Settings → AI Settings.'
+				: res.status === 429 ? 'OpenAI rate limit exceeded. Try again later.'
+				: `OpenAI error (${res.status}).`;
+			throw new Error(msg);
+		}
 		const j = await res.json();
 		text = j.choices[0].message.content;
 
@@ -60,7 +74,11 @@ export async function generateScript(
 				system, messages: [{ role: 'user', content }]
 			})
 		});
-		if (!res.ok) throw new Error(`Anthropic error (${res.status}).`);
+		if (!res.ok) {
+			const msg = res.status === 401 ? 'Invalid Anthropic key. Check Settings → AI Settings.'
+				: `Anthropic error (${res.status}).`;
+			throw new Error(msg);
+		}
 		const j = await res.json();
 		text = j.content[0].text;
 
@@ -93,7 +111,7 @@ export async function generateScript(
 		text = j.choices[0].message.content;
 
 	} else {
-		throw new Error('No AI provider configured. Add an API key in Settings → AI Settings.');
+		throw new Error('No AI provider selected. Add an API key in Settings → AI Settings.');
 	}
 
 	const clean = text.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
@@ -108,19 +126,32 @@ async function openaiTTS(text: string, voice: string, apiKey: string): Promise<A
 		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
 		body: JSON.stringify({ model: 'tts-1', input: text, voice, response_format: 'mp3' })
 	});
-	if (!res.ok) throw new Error(`OpenAI TTS error (${res.status}).`);
+	if (!res.ok) {
+		const msg = res.status === 401
+			? 'Invalid OpenAI key for TTS. Check Settings → AI Settings.'
+			: `OpenAI TTS error (${res.status}).`;
+		throw new Error(msg);
+	}
 	return await res.arrayBuffer();
 }
 
 // ── ElevenLabs TTS ────────────────────────────────────────────────────────────
 async function elevenLabsTTS(text: string, voiceId: string, apiKey: string): Promise<ArrayBuffer> {
-	if (!voiceId) throw new Error('ElevenLabs voice ID not configured in Settings → Audio.');
+	if (!voiceId) throw new Error('ElevenLabs Voice ID not set. Go to Settings → Audio and add your Voice IDs.');
+	if (!apiKey) throw new Error('ElevenLabs API key not set. Go to Settings → Audio.');
 	const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json', 'xi-api-key': apiKey },
 		body: JSON.stringify({ text, model_id: 'eleven_monolingual_v1', voice_settings: { stability: 0.5, similarity_boost: 0.75 } })
 	});
-	if (!res.ok) throw new Error(`ElevenLabs error (${res.status}).`);
+	if (!res.ok) {
+		const msg = res.status === 401
+			? 'ElevenLabs API key is invalid (401). Check Settings → Audio.'
+			: res.status === 422
+			? 'ElevenLabs Voice ID is invalid or not found. Check Settings → Audio.'
+			: `ElevenLabs error (${res.status}).`;
+		throw new Error(msg);
+	}
 	return await res.arrayBuffer();
 }
 

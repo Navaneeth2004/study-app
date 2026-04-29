@@ -19,22 +19,24 @@
 		children: import('svelte').Snippet;
 	}
 
-	let { type, blockData, blockId, collapsed, onToggleCollapse, onDelete, onAddBelow, onCopy, onPaste, onDragStart, onDragEnd, onDrop, draggingId, children }: Props = $props();
+	let {
+		type, blockData, blockId, collapsed, onToggleCollapse,
+		onDelete, onAddBelow, onCopy, onPaste,
+		onDragStart, onDragEnd, onDrop, draggingId, children
+	}: Props = $props();
 
 	let confirmingDelete = $state(false);
 	let showAddBelowPicker = $state(false);
 	let pickerOpenUpward = $state(false);
 	let addBelowBtn: HTMLButtonElement;
-
-	// Fix 28: Only allow drag from the handle icon
 	let isDraggableByHandle = $state(false);
 	const isDragging = $derived(draggingId === blockId);
 
 	function getPreview(data: ChapterBlock['data']): string {
-		if ('text' in data) return (data as {text:string}).text.slice(0, 60) || '—';
-		if ('html' in data) return (data as {html:string}).html.replace(/<[^>]+>/g, '').slice(0, 60) || '—';
-		if ('items' in data) return ((data as {items:string[]}).items[0] ?? '').slice(0, 60) || '—';
-		if ('headers' in data) return (data as {headers:string[]}).headers.join(', ').slice(0, 60) || '—';
+		if ('text' in data) return (data as { text: string }).text.slice(0, 60) || '—';
+		if ('html' in data) return (data as { html: string }).html.replace(/<[^>]+>/g, '').slice(0, 60) || '—';
+		if ('items' in data) return ((data as { items: string[] }).items[0] ?? '').slice(0, 60) || '—';
+		if ('headers' in data) return (data as { headers: string[] }).headers.join(', ').slice(0, 60) || '—';
 		return '—';
 	}
 
@@ -44,6 +46,11 @@
 			pickerOpenUpward = (window.innerHeight - rect.bottom) < 320;
 		}
 		showAddBelowPicker = true;
+	}
+
+	function handleAddBelowSelect(t: BlockType) {
+		showAddBelowPicker = false;
+		onAddBelow(t);
 	}
 
 	function handleHandleMouseDown() { isDraggableByHandle = true; }
@@ -78,7 +85,7 @@
 			: 'border-[var(--color-surface-700)] hover:border-[var(--color-surface-600)]'}"
 	>
 		<div class="flex items-center gap-2 px-4 py-3">
-			<!-- Drag handle only -->
+			<!-- Drag handle -->
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
 				class="shrink-0 cursor-grab text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity active:cursor-grabbing"
@@ -109,7 +116,7 @@
 					</svg>
 				</button>
 
-				<!-- Paste button (only shown when clipboard has content) -->
+				<!-- Paste button -->
 				{#if hasClipboard()}
 					<button onclick={onPaste} aria-label="Paste block below"
 						class="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-800)] hover:text-[var(--color-accent-400)] transition-colors" title="Paste block below">
@@ -175,7 +182,7 @@
 			<div class="absolute left-1/2 -translate-x-1/2 z-30 w-44 overflow-hidden rounded-xl border border-[var(--color-surface-700)] bg-[var(--color-surface-800)] shadow-2xl
 			            {pickerOpenUpward ? 'bottom-full mb-2' : 'top-full mt-1'}">
 				{#each Object.entries(BLOCK_TYPE_LABELS) as [t, label]}
-					<button onclick={() => { showAddBelowPicker = false; onAddBelow(t as BlockType); }}
+					<button onclick={() => handleAddBelowSelect(t as BlockType)}
 						class="flex w-full items-center px-4 py-2 text-left text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-700)] hover:text-[var(--color-text-primary)] transition-colors">
 						{label}
 					</button>

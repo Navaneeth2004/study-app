@@ -48,9 +48,11 @@
 	let error = $state('');
 	let saving = $state(false);
 	let isDirty = $state(false);
-	// Auto-save state
+	// Auto-save every 30s
 	let autoSaveStatus = $state<'idle' | 'pending' | 'saving' | 'saved'>('idle');
 	let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+	// Collapsed state per block id
+	let collapsedBlocks = $state<Set<string>>(new Set());
 	let previewMode = $state(false);
 	let showUnsavedModal = $state(false);
 	let pendingHref = $state('');
@@ -87,7 +89,7 @@
 			loading = false;
 		}
 
-		// Auto-save when page/tab becomes hidden (laptop lock, alt-tab away, etc.)
+		// Auto-save when tab becomes hidden
 		const onHide = () => { if (isDirty) saveAll(); };
 		document.addEventListener('visibilitychange', onHide);
 		return () => document.removeEventListener('visibilitychange', onHide);
@@ -122,10 +124,13 @@
 		}
 	}
 
+	// Schedule auto-save after 30 seconds of inactivity (not every keystroke)
 	function scheduleAutoSave() {
 		autoSaveStatus = 'pending';
 		if (autoSaveTimer) clearTimeout(autoSaveTimer);
-		autoSaveTimer = setTimeout(() => { if (isDirty) saveAll(); }, 4000);
+		autoSaveTimer = setTimeout(() => {
+			if (isDirty) saveAll();
+		}, 30000); // 30 seconds
 	}
 
 	async function handleTitleSave(value: string) {
@@ -137,6 +142,24 @@
 		try {
 			const block = await createBlock(chapterId, type, blocks.length + 1);
 			blocks = [...blocks, block];
+			isDirty = true;
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Could not add block.';
+		}
+	}
+
+	// Add block at a specific position (after a given block index)
+	async function handleAddBlockAt(type: BlockType, afterIndex: number) {
+		try {
+			const insertOrder = afterIndex + 2; // 1-based, after the target block
+			const block = await createBlock(chapterId, type, insertOrder);
+			// Insert at correct position in the local array
+			const newBlocks = [...blocks];
+			newBlocks.splice(afterIndex + 1, 0, block);
+			// Fix orders
+			blocks = newBlocks.map((b, i) => ({ ...b, order: i + 1 })) as RuntimeBlock[];
+			// Persist reorder
+			await reorderBlocks(blocks);
 			isDirty = true;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Could not add block.';
@@ -163,6 +186,43 @@
 		}
 	}
 
+	// Copy block to clipboard
+	function handleCopyBlock(blockId: string) {
+		const block = blocks.find((b) => b.id === blockId);
+		if (!block) return;
+		try {
+			localStorage.setItem('studyapp_block_clipboard', JSON.stringify({ type: block.type, data: block.data }));
+		} catch { /* ignore */ }
+	}
+
+	// Paste block from clipboard after a given index
+	async function handlePasteBlock(afterIndex: number) {
+		try {
+			const raw = localStorage.getItem('studyapp_block_clipboard');
+			if (!raw) return;
+			const { type, data } = JSON.parse(raw) as { type: BlockType; data: Record<string, unknown> };
+			const insertOrder = afterIndex + 2;
+			const block = await createBlock(chapterId, type, insertOrder);
+			// Immediately update its data
+			await updateBlock(block.id, data);
+			const updatedBlock = { ...block, data } as RuntimeBlock;
+			const newBlocks = [...blocks];
+			newBlocks.splice(afterIndex + 1, 0, updatedBlock);
+			blocks = newBlocks.map((b, i) => ({ ...b, order: i + 1 })) as RuntimeBlock[];
+			await reorderBlocks(blocks);
+			isDirty = true;
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Could not paste block.';
+		}
+	}
+
+	function toggleCollapse(blockId: string) {
+		const next = new Set(collapsedBlocks);
+		if (next.has(blockId)) next.delete(blockId);
+		else next.add(blockId);
+		collapsedBlocks = next;
+	}
+
 	async function handleUpload(file: File, blockId: string, fileType: 'image' | 'audio'): Promise<string> {
 		return await uploadFile(file, blockId, fileType);
 	}
@@ -170,6 +230,10 @@
 	function handleDragStart(e: DragEvent, id: string) {
 		draggingId = id;
 		e.dataTransfer?.setData('text/plain', id);
+	}
+
+	function handleDragEnd() {
+		draggingId = null;
 	}
 
 	async function handleDrop(e: DragEvent, targetId: string) {
@@ -282,7 +346,7 @@
 							? 'bg-[var(--color-accent-500)] text-[var(--color-text-primary)] hover:bg-[var(--color-accent-400)]'
 							: 'text-[var(--color-text-muted)] cursor-default'}">
 						{#if saving}Saving…
-						{:else if autoSaveStatus === 'pending'}<span class="opacity-70">Auto-saving…</span>
+						{:else if autoSaveStatus === 'pending'}<span class="opacity-70">Auto-save in 30s…</span>
 						{:else if autoSaveStatus === 'saved'}<span style="color:var(--color-success-500)">Saved ✓</span>
 						{:else if isDirty}Save
 						{:else}Saved{/if}
@@ -308,7 +372,7 @@
 
 		<!-- Blocks -->
 		<div role="list" class="flex flex-col gap-3">
-			{#each blocks as block (block.id)}
+			{#each blocks as block, blockIndex (block.id)}
 				{#if previewMode}
 					<div class="py-1">
 						{#if block.type === 'title'}<TitleBlockRenderer data={block.data} />
@@ -329,8 +393,14 @@
 						type={block.type}
 						blockData={block.data}
 						blockId={block.id}
+						collapsed={collapsedBlocks.has(block.id)}
+						onToggleCollapse={() => toggleCollapse(block.id)}
 						onDelete={() => handleDeleteBlock(block.id)}
+						onAddBelow={(type) => handleAddBlockAt(type, blockIndex)}
+						onCopy={() => handleCopyBlock(block.id)}
+						onPaste={() => handlePasteBlock(blockIndex)}
 						onDragStart={handleDragStart}
+						onDragEnd={handleDragEnd}
 						onDrop={handleDrop}
 						{draggingId}
 					>
